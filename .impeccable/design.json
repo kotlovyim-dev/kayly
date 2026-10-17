@@ -1,0 +1,697 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-17T18:14:46+00:00",
+  "title": "Design System: kayly",
+  "extensions": {
+    "colorMeta": {
+      "desk": {
+        "role": "primary",
+        "displayName": "Running-Light Blue Desk",
+        "canonical": "#1b2a5e",
+        "tonalRamp": [
+          "#060a18",
+          "#1b243d",
+          "#334066",
+          "#4c5f92",
+          "#6c80b6",
+          "#93a4d0",
+          "#bbc9ea",
+          "#e5eeff"
+        ],
+        "dark": "#1b2a5e"
+      },
+      "desk-ink": {
+        "role": "primary",
+        "displayName": "Desk Ink",
+        "canonical": "#e8ecfa",
+        "tonalRamp": [
+          "#080b13",
+          "#22252f",
+          "#3e414d",
+          "#5d616d",
+          "#7e828e",
+          "#a1a4b2",
+          "#c5c9d6",
+          "#eaeefc"
+        ],
+        "dark": "#e8ecfa"
+      },
+      "desk-ink-2": {
+        "role": "primary",
+        "displayName": "Desk Ink Secondary",
+        "canonical": "#aab5dc",
+        "tonalRamp": [
+          "#080b13",
+          "#202434",
+          "#3a4158",
+          "#57607f",
+          "#7881a2",
+          "#9ca4bf",
+          "#c2c8dd",
+          "#eaeefc"
+        ],
+        "dark": "#aab5dc"
+      },
+      "floor": {
+        "role": "neutral",
+        "displayName": "Rehearsal Floor",
+        "canonical": "#eceef2",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#242528",
+          "#404245",
+          "#5f6165",
+          "#808286",
+          "#a3a5a9",
+          "#c7c9cd",
+          "#eceef2"
+        ],
+        "dark": "#141518"
+      },
+      "sheet": {
+        "role": "neutral",
+        "displayName": "Sheet White",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ],
+        "dark": "#1c1d21"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#141b2e",
+        "tonalRamp": [
+          "#090b11",
+          "#21252f",
+          "#3c4251",
+          "#596176",
+          "#798298",
+          "#9da5b7",
+          "#c3c9d7",
+          "#ebeef7"
+        ],
+        "dark": "#e8e9ec"
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink Secondary",
+        "canonical": "#4c5670",
+        "tonalRamp": [
+          "#090b12",
+          "#202531",
+          "#3b4253",
+          "#576179",
+          "#78829b",
+          "#9ca5ba",
+          "#c3c9d9",
+          "#eaeef9"
+        ],
+        "dark": "#a6a9b2"
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Rule",
+        "canonical": "#d5d9e2",
+        "tonalRamp": [
+          "#090b11",
+          "#22252c",
+          "#3f4249",
+          "#5e6169",
+          "#7f828a",
+          "#a1a5ae",
+          "#c5c9d2",
+          "#eaeef8"
+        ],
+        "dark": "#2e3036"
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Hover Wash",
+        "canonical": "#f3f5f9",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#242528",
+          "#404245",
+          "#5f6165",
+          "#808286",
+          "#a3a5a9",
+          "#c7c9cd",
+          "#eceef2"
+        ],
+        "dark": "#25272c"
+      },
+      "plate": {
+        "role": "primary",
+        "displayName": "Live Plate",
+        "canonical": "#1b2a5e",
+        "tonalRamp": [
+          "#060a18",
+          "#1b243d",
+          "#334066",
+          "#4c5f92",
+          "#6c80b6",
+          "#93a4d0",
+          "#bbc9ea",
+          "#e5eeff"
+        ],
+        "dark": "#2a3f8f"
+      },
+      "plate-ink": {
+        "role": "primary",
+        "displayName": "Plate Ink",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ],
+        "dark": "#ffffff"
+      },
+      "plate-ink-2": {
+        "role": "primary",
+        "displayName": "Plate Ink Secondary",
+        "canonical": "#c3cbea",
+        "tonalRamp": [
+          "#090b11",
+          "#212430",
+          "#3d4153",
+          "#5a6078",
+          "#7b819b",
+          "#9fa4b9",
+          "#c4c8d9",
+          "#ebeef9"
+        ],
+        "dark": "#cdd5f4"
+      },
+      "action": {
+        "role": "primary",
+        "displayName": "Action Blue",
+        "canonical": "#1b2a5e",
+        "tonalRamp": [
+          "#060a18",
+          "#1b243d",
+          "#334066",
+          "#4c5f92",
+          "#6c80b6",
+          "#93a4d0",
+          "#bbc9ea",
+          "#e5eeff"
+        ],
+        "dark": "#3a56c4"
+      },
+      "action-hover": {
+        "role": "primary",
+        "displayName": "Action Blue Hover",
+        "canonical": "#26397c",
+        "tonalRamp": [
+          "#050a1b",
+          "#192342",
+          "#2f3f6e",
+          "#485d9d",
+          "#687fc2",
+          "#8fa3da",
+          "#b8c8f2",
+          "#e3eeff"
+        ],
+        "dark": "#4865d6"
+      },
+      "action-ink": {
+        "role": "primary",
+        "displayName": "Action Ink",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0b0b0b",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#a5a5a5",
+          "#c9c9c9",
+          "#eeeeee"
+        ],
+        "dark": "#ffffff"
+      },
+      "go": {
+        "role": "secondary",
+        "displayName": "Go Green",
+        "canonical": "#2e9e5b",
+        "tonalRamp": [
+          "#001003",
+          "#002f12",
+          "#005126",
+          "#00753b",
+          "#38985c",
+          "#72b886",
+          "#a5d8b2",
+          "#d8f8e0"
+        ],
+        "dark": "#3bbd70"
+      },
+      "go-ink": {
+        "role": "secondary",
+        "displayName": "Go Ink",
+        "canonical": "#1a6b3d",
+        "tonalRamp": [
+          "#010f05",
+          "#0a2d18",
+          "#1b4d2e",
+          "#2d7147",
+          "#509367",
+          "#80b38f",
+          "#aed4b9",
+          "#ddf6e4"
+        ],
+        "dark": "#6ad596"
+      },
+      "standby": {
+        "role": "secondary",
+        "displayName": "Standby Amber",
+        "canonical": "#e8a317",
+        "tonalRamp": [
+          "#170700",
+          "#3a1d00",
+          "#623700",
+          "#8c5300",
+          "#b07500",
+          "#cc9c4e",
+          "#e7c38d",
+          "#ffebc8"
+        ],
+        "dark": "#f0b43a"
+      },
+      "standby-ink": {
+        "role": "secondary",
+        "displayName": "Standby Ink",
+        "canonical": "#855700",
+        "tonalRamp": [
+          "#140800",
+          "#352001",
+          "#5a3b08",
+          "#815816",
+          "#a4793c",
+          "#c29e70",
+          "#dfc4a2",
+          "#fdecd5"
+        ],
+        "dark": "#f3c467"
+      },
+      "fail": {
+        "role": "secondary",
+        "displayName": "Fail Red",
+        "canonical": "#d2402f",
+        "tonalRamp": [
+          "#1f0000",
+          "#4a0803",
+          "#79190f",
+          "#ac2b1d",
+          "#d45240",
+          "#ec8372",
+          "#ffb2a4",
+          "#ffe0d6"
+        ],
+        "dark": "#ec5a48"
+      },
+      "fail-ink": {
+        "role": "secondary",
+        "displayName": "Fail Ink",
+        "canonical": "#b42318",
+        "tonalRamp": [
+          "#1f0000",
+          "#490905",
+          "#781a12",
+          "#ab2d21",
+          "#d35343",
+          "#eb8474",
+          "#ffb2a5",
+          "#ffe0d7"
+        ],
+        "dark": "#f2877a"
+      },
+      "focus": {
+        "role": "primary",
+        "displayName": "Focus Blue",
+        "canonical": "#3d63dd",
+        "tonalRamp": [
+          "#020725",
+          "#0f1f55",
+          "#213989",
+          "#3556c2",
+          "#537ae9",
+          "#7ea1fb",
+          "#acc8ff",
+          "#dbeeff"
+        ],
+        "dark": "#8aa4ff"
+      },
+      "code": {
+        "role": "neutral",
+        "displayName": "Code Ground",
+        "canonical": "#f4f6fa",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#242528",
+          "#404245",
+          "#5f6165",
+          "#808286",
+          "#a3a5a9",
+          "#c7c9cd",
+          "#eceef2"
+        ],
+        "dark": "#17181b"
+      },
+      "tape-pink": {
+        "role": "tertiary",
+        "displayName": "Spike Tape Pink",
+        "canonical": "#ff3d8b",
+        "tonalRamp": [
+          "#210009",
+          "#4e0020",
+          "#80003b",
+          "#b60058",
+          "#df3479",
+          "#f7729d",
+          "#ffa7c3",
+          "#ffd9ea"
+        ]
+      },
+      "tape-yellow": {
+        "role": "tertiary",
+        "displayName": "Spike Tape Yellow",
+        "canonical": "#f5d800",
+        "tonalRamp": [
+          "#120a00",
+          "#312400",
+          "#544000",
+          "#795f00",
+          "#9b8100",
+          "#b9a635",
+          "#d8cb81",
+          "#f8f0c1"
+        ]
+      },
+      "tape-green": {
+        "role": "tertiary",
+        "displayName": "Spike Tape Green",
+        "canonical": "#38c96a",
+        "tonalRamp": [
+          "#001100",
+          "#003107",
+          "#005316",
+          "#007927",
+          "#099c4a",
+          "#63bc79",
+          "#9cdba9",
+          "#d3fbda"
+        ]
+      },
+      "tape-blue": {
+        "role": "tertiary",
+        "displayName": "Spike Tape Blue",
+        "canonical": "#2f7bff",
+        "tonalRamp": [
+          "#000728",
+          "#011f59",
+          "#073b90",
+          "#1358cb",
+          "#397cf2",
+          "#6da4ff",
+          "#a0caff",
+          "#d4f0ff"
+        ]
+      },
+      "tape-orange": {
+        "role": "tertiary",
+        "displayName": "Spike Tape Orange",
+        "canonical": "#ff7a1a",
+        "tonalRamp": [
+          "#1e0100",
+          "#480e00",
+          "#762100",
+          "#a83600",
+          "#cf5b00",
+          "#e78a55",
+          "#feb690",
+          "#ffe3ca"
+        ]
+      },
+      "tape-violet": {
+        "role": "tertiary",
+        "displayName": "Spike Tape Violet",
+        "canonical": "#9b5cff",
+        "tonalRamp": [
+          "#100126",
+          "#2d0d57",
+          "#4e218c",
+          "#7236c6",
+          "#935ced",
+          "#b18cfe",
+          "#d1b8ff",
+          "#f3e4ff"
+        ]
+      },
+      "tape-cyan": {
+        "role": "tertiary",
+        "displayName": "Spike Tape Cyan",
+        "canonical": "#00b8c4",
+        "tonalRamp": [
+          "#001013",
+          "#002d33",
+          "#004e56",
+          "#00727d",
+          "#00959f",
+          "#5bb5bd",
+          "#98d6dc",
+          "#d0f7fb"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "cue": {
+        "displayName": "Cue",
+        "purpose": "Largest type on a page: the live release number (mono) and the sign-in wordmark."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Project name beside its spike strip; desk wordmark."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running text, table cells, controls; 600 for buttons, 700 for sheet headings."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Labels, hints, table headers, timestamps, small buttons."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Anything typed or copied: commands, logs, env keys, hostnames. Same meta size; mono also runs at body and cue sizes."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "transition-colors",
+        "value": "150ms",
+        "purpose": "All hover and state colour changes."
+      },
+      {
+        "name": "lamp-go",
+        "value": "420ms cubic-bezier(0.16, 1, 0.3, 1); scale 0.4 -> 1.25 -> 1",
+        "purpose": "Go lamp lands on the newly live row; the one authored moment."
+      },
+      {
+        "name": "lamp-standby",
+        "value": "1.1s ease-in-out infinite; opacity 1 -> 0.35",
+        "purpose": "Standby ring blink while armed or running."
+      },
+      {
+        "name": "standby-timeout",
+        "value": "4000ms",
+        "purpose": "Armed standby-then-go stands down after this."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "animation: none",
+        "purpose": "Both lamp animations stop under prefers-reduced-motion."
+      }
+    ],
+    "focus": {
+      "value": "outline: 2px solid var(--k-focus); outline-offset: 2px; border-radius: 4px",
+      "purpose": "Every focusable element."
+    },
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "max-width",
+        "value": "1440px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one forward action in a context.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Add domain</button>",
+      "css": ".ds-btn { font-family: var(--font-sans, 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif); display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 14px; border:1px solid transparent; border-radius:6px; font-size:0.9375rem; font-weight:600; white-space:nowrap; cursor:pointer; transition:background-color 150ms, border-color 150ms; } .ds-btn-primary { background:var(--k-action,#1b2a5e); color:var(--k-action-ink,#fff); } .ds-btn-primary:hover { background:var(--k-action-hover,#26397c); } .ds-btn:focus-visible { outline:2px solid var(--k-focus,#3d63dd); outline-offset:2px; }"
+    },
+    {
+      "name": "Quiet Button",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Default button on sheets and floor.",
+      "html": "<button class=\"ds-btn-quiet\">Set value</button>",
+      "css": ".ds-btn-quiet { font-family: var(--font-sans, 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif); display:inline-flex; align-items:center; height:36px; padding:0 14px; background:var(--k-sheet,#fff); color:var(--k-ink,#141b2e); border:1px solid var(--k-rule,#d5d9e2); border-radius:6px; font-size:0.9375rem; font-weight:600; cursor:pointer; transition:background-color 150ms; } .ds-btn-quiet:hover { background:var(--k-hover,#f3f5f9); } .ds-btn-quiet:focus-visible { outline:2px solid var(--k-focus,#3d63dd); outline-offset:2px; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive confirm after a typed check.",
+      "html": "<button class=\"ds-btn-danger\">Delete Postgres</button>",
+      "css": ".ds-btn-danger { font-family: var(--font-sans, 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif); display:inline-flex; align-items:center; height:36px; padding:0 14px; background:var(--k-sheet,#fff); color:var(--k-fail-ink,#b42318); border:1px solid var(--k-rule,#d5d9e2); border-radius:6px; font-size:0.9375rem; font-weight:600; cursor:pointer; transition:background-color 150ms, border-color 150ms; } .ds-btn-danger:hover { border-color:var(--k-fail,#d2402f); background:var(--k-hover,#f3f5f9); } .ds-btn-danger:focus-visible { outline:2px solid var(--k-focus,#3d63dd); outline-offset:2px; }"
+    },
+    {
+      "name": "Standby-then-go",
+      "kind": "custom",
+      "refersTo": "standby-go-armed",
+      "description": "Two-press call for roll back, redeploy and env/domain deletion; shown armed.",
+      "html": "<button class=\"ds-sg\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 12 12\" class=\"ds-sg-lamp\"><circle cx=\"6\" cy=\"6\" r=\"4.25\" fill=\"none\" stroke=\"var(--k-standby,#e8a317)\" stroke-width=\"2.5\"/></svg>Go: r9 live</button>",
+      "css": ".ds-sg { font-family: var(--font-sans, 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif); display:inline-flex; align-items:center; gap:8px; height:32px; padding:0 10px; background:color-mix(in oklab, var(--k-standby,#e8a317) 15%, transparent); color:var(--k-ink,#141b2e); border:1px solid var(--k-standby,#e8a317); border-radius:6px; font-size:0.8125rem; font-weight:600; cursor:pointer; } .ds-sg-lamp { animation: ds-blink 1.1s ease-in-out infinite; } @keyframes ds-blink { 50% { opacity:.35; } } .ds-sg:focus-visible { outline:2px solid var(--k-focus,#3d63dd); outline-offset:2px; } @media (prefers-reduced-motion: reduce) { .ds-sg-lamp { animation:none; } }"
+    },
+    {
+      "name": "Cue Lamps",
+      "kind": "custom",
+      "refersTo": "lamp",
+      "description": "Live, standby, failed, superseded, off: shape and colour.",
+      "html": "<span class=\"ds-lamps\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 12 12\"><circle cx=\"6\" cy=\"6\" r=\"5.5\" fill=\"var(--k-go,#2e9e5b)\" opacity=\".22\"/><circle cx=\"6\" cy=\"6\" r=\"3.75\" fill=\"var(--k-go,#2e9e5b)\"/></svg><svg width=\"12\" height=\"12\" viewBox=\"0 0 12 12\"><circle cx=\"6\" cy=\"6\" r=\"4.25\" fill=\"none\" stroke=\"var(--k-standby,#e8a317)\" stroke-width=\"2.5\"/></svg><svg width=\"12\" height=\"12\" viewBox=\"0 0 12 12\"><circle cx=\"6\" cy=\"6\" r=\"4.5\" fill=\"var(--k-fail,#d2402f)\"/><path d=\"M3.4 8.6 8.6 3.4\" stroke=\"var(--k-sheet,#fff)\" stroke-width=\"1.6\" stroke-linecap=\"round\"/></svg><svg width=\"12\" height=\"12\" viewBox=\"0 0 12 12\"><circle cx=\"6\" cy=\"6\" r=\"4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" opacity=\".55\"/></svg><svg width=\"12\" height=\"12\" viewBox=\"0 0 12 12\"><circle cx=\"6\" cy=\"6\" r=\"4.25\" fill=\"currentColor\" opacity=\".28\"/></svg></span>",
+      "css": ".ds-lamps { display:inline-flex; gap:12px; align-items:center; color:var(--k-ink,#141b2e); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Field with meta label.",
+      "html": "<label class=\"ds-field\"><span>Hostname</span><input class=\"ds-input\" placeholder=\"app.example.com\"></label>",
+      "css": ".ds-field { font-family: var(--font-sans, 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif); display:flex; flex-direction:column; gap:4px; } .ds-field span { font-size:0.8125rem; font-weight:600; color:var(--k-ink-2,#4c5670); } .ds-input { font:inherit; font-size:0.9375rem; height:36px; padding:0 12px; background:var(--k-sheet,#fff); color:var(--k-ink,#141b2e); border:1px solid var(--k-rule,#d5d9e2); border-radius:6px; transition:border-color 150ms; } .ds-input:hover { border-color:color-mix(in oklab, var(--k-ink-2,#4c5670) 60%, transparent); } .ds-input:focus { outline:none; border-color:var(--k-focus,#3d63dd); } .ds-input:focus-visible { outline:2px solid color-mix(in oklab, var(--k-focus,#3d63dd) 40%, transparent); }"
+    },
+    {
+      "name": "Desk Bar",
+      "kind": "nav",
+      "refersTo": "desk-bar",
+      "description": "Sticky prompt-desk bar: wordmark, switcher, sign out.",
+      "html": "<nav class=\"ds-desk\"><a class=\"ds-mark\" href=\"#\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 12 12\"><circle cx=\"6\" cy=\"6\" r=\"5.5\" fill=\"var(--k-go,#2e9e5b)\" opacity=\".22\"/><circle cx=\"6\" cy=\"6\" r=\"3.75\" fill=\"var(--k-go,#2e9e5b)\"/></svg>kayly</a><select class=\"ds-switch\"><option>hello</option></select><button class=\"ds-out\">Sign out</button></nav>",
+      "css": ".ds-desk { font-family: var(--font-sans, 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif); display:flex; align-items:center; gap:16px; height:48px; padding:0 24px; background:var(--k-desk,#1b2a5e); color:var(--k-desk-ink,#e8ecfa); } .ds-mark { display:flex; align-items:center; gap:8px; font-size:1.1875rem; font-weight:700; letter-spacing:-0.025em; color:inherit; text-decoration:none; } .ds-switch { font:inherit; font-size:0.9375rem; height:32px; padding:0 8px; background:var(--k-desk,#1b2a5e); color:var(--k-desk-ink,#e8ecfa); border:1px solid color-mix(in oklab, var(--k-desk-ink,#e8ecfa) 20%, transparent); border-radius:6px; } .ds-out { font:inherit; margin-left:auto; height:32px; padding:0 8px; background:none; border:0; border-radius:6px; color:var(--k-desk-ink-2,#aab5dc); cursor:pointer; transition:background-color 150ms, color 150ms; } .ds-out:hover { background:color-mix(in oklab, var(--k-desk-ink,#e8ecfa) 10%, transparent); color:var(--k-desk-ink,#e8ecfa); } .ds-desk :focus-visible { outline:2px solid var(--k-focus,#3d63dd); outline-offset:2px; }"
+    },
+    {
+      "name": "Release Cue Sheet",
+      "kind": "card",
+      "refersTo": "sheet",
+      "description": "Full sheet with the live row as the one reversed plate.",
+      "html": "<section class=\"ds-sheet\"><header>Releases</header><div class=\"ds-row ds-live\"><b>r11</b><span>2 minutes ago</span><span>Live</span></div><div class=\"ds-row\"><b>r10</b><span>3 minutes ago</span><span class=\"ds-dim\">Previous</span></div></section>",
+      "css": ".ds-sheet { font-family: var(--font-sans, 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif); background:var(--k-sheet,#fff); border:1px solid var(--k-rule,#d5d9e2); border-radius:8px; overflow:hidden; color:var(--k-ink,#141b2e); font-size:0.9375rem; } .ds-sheet header { min-height:48px; display:flex; align-items:center; padding:8px 16px; font-weight:700; border-bottom:1px solid var(--k-rule,#d5d9e2); } .ds-row { display:flex; gap:16px; padding:10px 16px; border-bottom:1px solid var(--k-rule,#d5d9e2); } .ds-row:hover { background:var(--k-hover,#f3f5f9); } .ds-row b { font-family:var(--font-mono,'Atkinson Hyperlegible Mono Variable',monospace); font-weight:600; } .ds-row span:first-of-type { font-size:0.8125rem; color:var(--k-ink-2,#4c5670); } .ds-live, .ds-live:hover { background:var(--k-plate,#1b2a5e); color:var(--k-plate-ink,#fff); border-bottom:0; } .ds-live span:first-of-type { color:var(--k-plate-ink-2,#c3cbea); } .ds-dim { color:var(--k-ink-2,#4c5670); }"
+    },
+    {
+      "name": "Spike Strip",
+      "kind": "chip",
+      "refersTo": "spike-strip",
+      "description": "Project identity tape beside its name.",
+      "html": "<span class=\"ds-proj\"><span class=\"ds-tape\"></span>hello</span>",
+      "css": ".ds-proj { font-family: var(--font-sans, 'Atkinson Hyperlegible Next Variable', system-ui, sans-serif); display:inline-flex; align-items:center; gap:12px; font-size:1.1875rem; font-weight:700; color:var(--k-ink,#141b2e); } .ds-tape { display:inline-block; width:22px; height:7px; border-radius:1px; transform:rotate(-6deg); background:#ff3d8b; }"
+    },
+    {
+      "name": "Command",
+      "kind": "custom",
+      "refersTo": "command",
+      "description": "CLI next step with copy.",
+      "html": "<div class=\"ds-cmd\"><code>kayly deploy -p hello</code><button aria-label=\"Copy command\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/></svg></button></div>",
+      "css": ".ds-cmd { display:flex; align-items:center; gap:8px; padding:4px 4px 4px 12px; background:var(--k-code,#f4f6fa); border:1px solid var(--k-rule,#d5d9e2); border-radius:6px; } .ds-cmd code { flex:1; font-family:var(--font-mono,'Atkinson Hyperlegible Mono Variable',monospace); font-size:0.8125rem; white-space:nowrap; color:var(--k-ink,#141b2e); } .ds-cmd button { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; border:0; border-radius:6px; background:none; color:var(--k-ink-2,#4c5670); cursor:pointer; transition:background-color 150ms, color 150ms; } .ds-cmd button:hover { background:var(--k-hover,#f3f5f9); color:var(--k-ink,#141b2e); } .ds-cmd button:focus-visible { outline:2px solid var(--k-focus,#3d63dd); outline-offset:2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Prompt Book",
+    "overview": "Every release is a cue in a stage manager's prompt book: it stands by until it proves itself, then goes, and the previous one bows out. The interface is a running-light blue prompt-desk bar over a cool rehearsal-floor grey. The work sits on white sheets, cue lamps report state, and a short strip of spike tape marks each project.\n\nThe system is dense, quiet and data-first. One workhorse family in two widths (Atkinson Hyperlegible Next and Mono) carries everything at four sizes. Colour is scarce. Blue belongs to the desk, the primary action and the single reversed plate. Green, amber and red belong to the lamps and their ink. The fluorescent tape colours appear only on spike strips. Depth comes from rules and the sheet-on-floor contrast, never from shadows.\n\nMotion is limited to one authored moment: the go lamp landing on its new row when a release hands over. Everything else is a 150 ms colour transition.",
+    "keyCharacteristics": [
+      "A blue desk bar on top, a grey floor below, white sheets for primary work, and ruled quiet sections for supporting work.",
+      "Cue lamps whose state reads from shape as well as colour.",
+      "Spike-tape strips derived from the project name.",
+      "Four type sizes, two widths of one family.",
+      "A two-press standby-then-go call before any action that changes what is live or deletes configuration.",
+      "Flat, ruled, 1px borders; no shadows."
+    ],
+    "rules": [
+      {
+        "name": "The Lamp Colour Rule",
+        "body": "Green, amber and red mean live, standby and failed. They are never used to decorate.",
+        "section": "colors"
+      },
+      {
+        "name": "The Neutral Ground Rule",
+        "body": "In dark mode the blue stays on the desk and the plate. The floor, sheets and rules are neutral greys.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tape Is Identity Rule",
+        "body": "Fluorescent tape colours appear only on spike strips. They never carry state.",
+        "section": "colors"
+      },
+      {
+        "name": "The Four Sizes Rule",
+        "body": "There are exactly four type sizes: meta, body, title and cue. Express hierarchy through weight (400/600/700) and the mono width, never through a fifth size.",
+        "section": "typography"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "Every label, heading and button uses plain sentence case, with no uppercase tracking. A heading names its sheet and nothing restates it.",
+        "section": "typography"
+      },
+      {
+        "name": "The Ruled Not Raised Rule",
+        "body": "Separate surfaces with 1px rules and the sheet-against-floor contrast. Do not add box-shadows.",
+        "section": "elevation"
+      },
+      {
+        "name": "The One Plate Rule",
+        "body": "The live release row is the only reversed row in the interface. The selected tab of the log service switcher uses the same plate colour as a selection state, but no other row or card is ever reversed.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** mark every project with its spike strip, using the colour derived from the name.",
+      "**Do** carry lamp state through shape as well as colour (filled, ringed, struck, hollow, grey disc).",
+      "**Do** gate roll back, redeploy and env/domain deletion behind standby-then-go, with a go label that names the exact outcome.",
+      "**Do** put primary work on full sheets and supporting work in quiet sections on the floor.",
+      "**Do** set anything a user types or copies in Atkinson Hyperlegible Mono.",
+      "**Do** keep transitions to 150 ms colour changes and respect reduced motion."
+    ],
+    "donts": [
+      "**Don't** add a fifth type size.",
+      "**Don't** reverse any row other than the live release.",
+      "**Don't** use box-shadows; separate surfaces with 1px rules.",
+      "**Don't** put blue on the floor or the sheets in dark mode; keep blue on the desk, plate and action.",
+      "**Don't** use lamp green, amber or red, or spike-tape colours, for decoration.",
+      "**Don't** use a dark sidebar with a grid of project cards; projects are a ruled list on a sheet."
+    ]
+  }
+}
