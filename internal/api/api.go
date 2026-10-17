@@ -256,7 +256,9 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Releases = []ReleaseView{}
 	for _, rel := range rels {
-		d.Releases = append(d.Releases, releaseView(rel))
+		v := releaseView(rel)
+		v.CanRollBack = s.deployer.CanRollBack(ctx, rel)
+		d.Releases = append(d.Releases, v)
 		if rel.ID == p.ActiveRelease {
 			d.LiveSeq, d.LiveSince = rel.Seq, rel.CreatedAt.UTC().Format(time.RFC3339)
 		}
@@ -363,6 +365,8 @@ type ReleaseView struct {
 	Status    string `json:"status"`
 	Error     string `json:"error,omitempty"`
 	CreatedAt string `json:"created_at"`
+	// CanRollBack is true for a previous release whose image is still kept.
+	CanRollBack bool `json:"can_roll_back,omitempty"`
 }
 
 func (s *Server) listReleases(w http.ResponseWriter, r *http.Request) {
@@ -377,7 +381,9 @@ func (s *Server) listReleases(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []ReleaseView{}
 	for _, rel := range rels {
-		out = append(out, releaseView(rel))
+		v := releaseView(rel)
+		v.CanRollBack = s.deployer.CanRollBack(r.Context(), rel)
+		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

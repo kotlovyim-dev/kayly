@@ -325,6 +325,14 @@ func TestPruneKeepsRecentImages(t *testing.T) {
 	for range 4 {
 		h.mustDeploy()
 	}
+	ctx := context.Background()
+	p, _ := h.st.Project(ctx, "app")
+	for seq, want := range map[int]bool{1: false, 2: false, 3: true, 4: false} { // r4 is live, not a rollback target
+		r, _ := h.st.Release(ctx, p.ID, seq)
+		if got := h.d.CanRollBack(ctx, r); got != want {
+			t.Errorf("CanRollBack(r%d) = %v, want %v", seq, got, want)
+		}
+	}
 	h.rt.mu.Lock()
 	defer h.rt.mu.Unlock()
 	for seq, want := range map[int]bool{1: false, 2: false, 3: true, 4: true} {

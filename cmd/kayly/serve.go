@@ -22,6 +22,7 @@ import (
 	"github.com/kotlovyim-dev/kayly/internal/proxy"
 	"github.com/kotlovyim-dev/kayly/internal/secret"
 	"github.com/kotlovyim-dev/kayly/internal/store"
+	"github.com/kotlovyim-dev/kayly/web"
 )
 
 // Pinned infrastructure. Bump together with install.sh.
@@ -135,6 +136,10 @@ func serve(args []string) error {
 	}
 
 	srv := api.New(st, d, p.builds(), log)
+	srv.UI = web.UI()
+	if srv.UI == nil {
+		log.Warn("this build has no web UI; build it with `npm run build` in web/")
+	}
 	public, err := listenUnix(p.publicSock(), 0o666)
 	if err != nil {
 		return err

@@ -635,3 +635,13 @@ func (d *Deployer) Services(ctx context.Context, project string) ([]ServiceView,
 	}
 	return out, nil
 }
+
+// CanRollBack reports whether rel can become live again: it was live once and its image is
+// still on disk (only the newest KeepImages are kept).
+func (d *Deployer) CanRollBack(ctx context.Context, rel store.Release) bool {
+	if rel.Status != store.StatusSuperseded || rel.Image == "" {
+		return false
+	}
+	ok, err := d.rt.ImageExists(ctx, rel.Image)
+	return err == nil && ok
+}
