@@ -58,7 +58,7 @@ Runtime dependencies on the host, all installed and pinned by `install.sh`:
 
 | Dependency | Role | Why not something else |
 |---|---|---|
-| Docker Engine + buildx plugin | runtime and builds (BuildKit) | Swarm/K8s cost RAM and complexity a single server does not need |
+| Docker Engine + buildx plugin, containerd image store | runtime and builds (BuildKit; Railpack needs the containerd store) | Swarm/K8s cost RAM and complexity a single server does not need |
 | Caddy 2, as the `kayly-proxy` container | TLS, routing, WebSocket/SSE, compression | Zero-downtime config loads with automatic rollback on a bad config, on-demand TLS for custom domains, HTTP/3. Not embedded in the daemon: invariant 4 |
 | Railpack CLI | zero-config builds when there is no Dockerfile | The 2026 standard (Railway, Coolify). Used as `railpack prepare` + the BuildKit frontend, the documented production path |
 

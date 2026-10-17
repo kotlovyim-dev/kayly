@@ -30,6 +30,17 @@ if ! command -v docker >/dev/null; then
 fi
 docker buildx version >/dev/null 2>&1 || die "docker buildx is missing; install the docker-buildx-plugin package"
 
+# Railpack builds use a BuildKit feature Docker allows only with the containerd image store,
+# the default on fresh installs since Docker 29. Older installs keep the classic store.
+if ! docker info --format '{{json .DriverStatus}}' | grep -q io.containerd.snapshotter; then
+  if [ -n "$(docker ps -aq)" ] || [ -s /etc/docker/daemon.json ]; then
+    die "Docker uses the classic image store, which Railpack builds cannot use. Add \"features\": {\"containerd-snapshotter\": true} to /etc/docker/daemon.json and restart Docker (images in the old store become invisible), then run this again."
+  fi
+  say "Switching Docker to the containerd image store"
+  printf '{ "features": { "containerd-snapshotter": true } }\n' >/etc/docker/daemon.json
+  systemctl restart docker
+fi
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
