@@ -1,0 +1,96 @@
+{
+  "admin": {
+    "listen": "unix//run/kayly/caddy.sock"
+  },
+  "apps": {
+    "http": {
+      "servers": {
+        "kayly": {
+          "listen": [
+            ":443"
+          ],
+          "routes": [
+            {
+              "match": [
+                {
+                  "host": [
+                    "leryo.example.com"
+                  ]
+                }
+              ],
+              "handle": [
+                {
+                  "handler": "encode",
+                  "encodings": {
+                    "gzip": {},
+                    "zstd": {}
+                  },
+                  "prefer": [
+                    "zstd",
+                    "gzip"
+                  ]
+                },
+                {
+                  "handler": "reverse_proxy",
+                  "upstreams": [
+                    {
+                      "dial": "leryo-app-r12:3000"
+                    }
+                  ],
+                  "flush_interval": -1
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "match": [
+                {
+                  "host": [
+                    "ten00.example.com"
+                  ]
+                }
+              ],
+              "handle": [
+                {
+                  "handler": "encode",
+                  "encodings": {
+                    "gzip": {},
+                    "zstd": {}
+                  },
+                  "prefer": [
+                    "zstd",
+                    "gzip"
+                  ]
+                },
+                {
+                  "handler": "reverse_proxy",
+                  "upstreams": [
+                    {
+                      "dial": "ten00-web-r4:3000"
+                    }
+                  ],
+                  "flush_interval": -1
+                }
+              ],
+              "terminal": true
+            }
+          ]
+        }
+      }
+    },
+    "tls": {
+      "automation": {
+        "policies": [
+          {
+            "issuers": [
+              {
+                "module": "acme",
+                "email": "ops@example.com"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
