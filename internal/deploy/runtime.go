@@ -30,6 +30,17 @@ type Runtime interface {
 	List(ctx context.Context) ([]Container, error)
 	ImageExists(ctx context.Context, ref string) (bool, error)
 	RemoveImage(ctx context.Context, ref string) error
+	// TagImage gives an existing image a second name.
+	TagImage(ctx context.Context, src, dst string) error
+	// EnsureContainer keeps a long-lived container (proxy, add-on) running as spec says:
+	// it is left alone if it already runs that spec, replaced otherwise, and its image is
+	// pulled if missing.
+	EnsureContainer(ctx context.Context, spec Spec) error
+	// Exec runs cmd in a running container, streaming stdout to w, and returns its exit
+	// code. Stderr is returned in the error when the command fails.
+	Exec(ctx context.Context, name string, cmd []string, w io.Writer) (int, error)
+	// RemoveVolume deletes a volume and its data. A missing volume is not an error.
+	RemoveVolume(ctx context.Context, name string) error
 }
 
 // ErrNoContainer is returned by Runtime.Inspect for a missing container.
@@ -62,7 +73,12 @@ type Spec struct {
 	Image string
 	// Cmd is the full command line: it replaces the image's entrypoint and command and runs
 	// without a shell. Nil keeps the image's own.
-	Cmd      []string
+	Cmd []string
+	// KeepEntrypoint passes Cmd as arguments to the image's entrypoint instead, for images
+	// whose entrypoint prepares the container (add-ons).
+	KeepEntrypoint bool
+	// Health is a Docker healthcheck test, e.g. ["CMD-SHELL", "pg_isready"].
+	Health   []string
 	Env      map[string]string
 	Labels   map[string]string
 	Networks []Network
@@ -115,6 +131,8 @@ type Container struct {
 	StartedAt    time.Time
 	// IP is the container's address on the edge network, empty if not attached.
 	IP string
+	// Health is "starting", "healthy" or "unhealthy" for a container with a healthcheck.
+	Health string
 }
 
 // Labels Kayly puts on every container it creates, so actual state maps back to desired state.
@@ -126,6 +144,7 @@ const (
 
 	RoleService = "service"
 	RoleRelease = "release"
+	RoleAddon   = "addon"
 )
 
 // EdgeNetwork is shared by the proxy and every service with a port.

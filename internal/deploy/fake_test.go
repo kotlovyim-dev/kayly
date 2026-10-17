@@ -35,6 +35,7 @@ type fakeContainer struct {
 	spec    Spec
 	running bool
 	exit    int
+	health  string
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -98,6 +99,9 @@ func (f *fakeRuntime) Run(_ context.Context, spec Spec) error {
 		}
 	}
 	c := &fakeContainer{spec: spec, running: true}
+	if spec.Health != nil {
+		c.health = "healthy"
+	}
 	if !spec.Restart { // a one-off run finishes at once
 		c.running, c.exit = false, f.exitCode[spec.Name]
 	}
@@ -145,7 +149,7 @@ func (f *fakeRuntime) Inspect(_ context.Context, name string) (Container, error)
 func (f *fakeRuntime) view(name string, c *fakeContainer) Container {
 	v := Container{
 		Name: name, Labels: c.spec.Labels, Running: c.running, ExitCode: c.exit,
-		StartedAt: time.Now().Add(-time.Hour),
+		StartedAt: time.Now().Add(-time.Hour), Health: c.health,
 	}
 	for _, n := range c.spec.Networks {
 		if n.Name == EdgeNetwork {
@@ -264,4 +268,68 @@ func (p *fakeProxy) routesTo(upstream string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return strings.Contains(p.last, `"dial": "`+upstream+`"`)
+}
+
+func (f *fakeRuntime) TagImage(_ context.Context, src, dst string) error {
+	if err := f.call("TagImage", dst); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.images[src] {
+		return fmt.Errorf("no image %s", src)
+	}
+	f.images[dst] = true
+	return nil
+}
+
+func (f *fakeRuntime) EnsureContainer(ctx context.Context, spec Spec) error {
+	if err := f.call("EnsureContainer", spec.Name); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	c, ok := f.containers[spec.Name]
+	if ok && c.running {
+		f.mu.Unlock()
+		return nil
+	}
+	delete(f.containers, spec.Name)
+	f.images[spec.Image] = true // pulled
+	f.mu.Unlock()
+	return f.Run(ctx, spec)
+}
+
+// Exec answers pg_dump with a fake dump.
+func (f *fakeRuntime) Exec(_ context.Context, name string, cmd []string, w io.Writer) (int, error) {
+	if err := f.call("Exec", name); err != nil {
+		return 1, err
+	}
+	f.mu.Lock()
+	_, ok := f.containers[name]
+	f.mu.Unlock()
+	if !ok {
+		return 0, ErrNoContainer
+	}
+	fmt.Fprintf(w, "dump of %s by %s", name, cmd[0])
+	return 0, nil
+}
+
+func (f *fakeRuntime) RemoveVolume(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.volumes, name)
+	return nil
+}
+
+// serviceNames returns the containers that are not add-ons, sorted.
+func (f *fakeRuntime) serviceNames() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(f.containers)) {
+		if f.containers[name].spec.Labels[LabelRole] != RoleAddon {
+			out = append(out, name)
+		}
+	}
+	return out
 }

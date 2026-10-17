@@ -2,6 +2,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -125,7 +126,7 @@ func (r *Runtime) Run(ctx context.Context, s deploy.Spec) error {
 	}
 
 	var entrypoint []string
-	if s.Cmd != nil {
+	if s.Cmd != nil && !s.KeepEntrypoint {
 		// [""] tells the engine to drop the image's entrypoint (as `docker run --entrypoint ""`).
 		// Without it, an image with ENTRYPOINT ["bash", "-c"], as Railpack builds, would run
 		// only the first word of the command.
@@ -140,6 +141,7 @@ func (r *Runtime) Run(ctx context.Context, s deploy.Spec) error {
 			Env:          env,
 			Labels:       s.Labels,
 			ExposedPorts: exposed,
+			Healthcheck:  healthcheck(s.Health),
 		},
 		HostConfig:       host,
 		NetworkingConfig: netcfg,
@@ -204,6 +206,9 @@ func (r *Runtime) Inspect(ctx context.Context, name string) (deploy.Container, e
 	if st := ci.State; st != nil {
 		c.Running, c.Restarting, c.ExitCode = st.Running, st.Restarting, st.ExitCode
 		c.StartedAt, _ = time.Parse(time.RFC3339Nano, st.StartedAt)
+		if st.Health != nil {
+			c.Health = string(st.Health.Status)
+		}
 	}
 	if ci.NetworkSettings != nil {
 		if ep := ci.NetworkSettings.Networks[deploy.EdgeNetwork]; ep != nil && ep.IPAddress.IsValid() {
@@ -319,6 +324,56 @@ func (r *Runtime) pull(ctx context.Context, ref string) error {
 	defer res.Close()
 	if err := res.Wait(ctx); err != nil {
 		return fmt.Errorf("docker: pull %s: %w", ref, err)
+	}
+	return nil
+}
+
+func healthcheck(test []string) *container.HealthConfig {
+	if test == nil {
+		return nil
+	}
+	return &container.HealthConfig{
+		Test: test, Interval: 2 * time.Second, Timeout: 5 * time.Second, Retries: 30, StartPeriod: 5 * time.Second,
+	}
+}
+
+// TagImage gives the image src the additional name dst.
+func (r *Runtime) TagImage(ctx context.Context, src, dst string) error {
+	if _, err := r.c.ImageTag(ctx, client.ImageTagOptions{Source: src, Target: dst}); err != nil {
+		return fmt.Errorf("docker: tag %s as %s: %w", src, dst, err)
+	}
+	return nil
+}
+
+// Exec runs cmd inside a running container.
+func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, w io.Writer) (int, error) {
+	ex, err := r.c.ExecCreate(ctx, name, client.ExecCreateOptions{Cmd: cmd, AttachStdout: true, AttachStderr: true})
+	if err != nil {
+		return 0, fmt.Errorf("docker: exec in %s: %w", name, err)
+	}
+	att, err := r.c.ExecAttach(ctx, ex.ID, client.ExecAttachOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("docker: exec in %s: %w", name, err)
+	}
+	defer att.Close()
+	var stderr bytes.Buffer
+	if _, err := stdcopy.StdCopy(w, &stderr, att.Reader); err != nil {
+		return 0, fmt.Errorf("docker: exec in %s: %w", name, err)
+	}
+	res, err := r.c.ExecInspect(ctx, ex.ID, client.ExecInspectOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("docker: exec in %s: %w", name, err)
+	}
+	if res.ExitCode != 0 {
+		return res.ExitCode, fmt.Errorf("%s: %s exited with %d: %s", name, cmd[0], res.ExitCode, bytes.TrimSpace(stderr.Bytes()))
+	}
+	return 0, nil
+}
+
+// RemoveVolume deletes a volume and its data.
+func (r *Runtime) RemoveVolume(ctx context.Context, name string) error {
+	if _, err := r.c.VolumeRemove(ctx, name, client.VolumeRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("docker: remove volume %s: %w", name, err)
 	}
 	return nil
 }

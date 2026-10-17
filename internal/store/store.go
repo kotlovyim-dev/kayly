@@ -99,6 +99,16 @@ CREATE TABLE token (
 	created_at   INTEGER NOT NULL,
 	last_used_at INTEGER
 );
+`, `
+CREATE TABLE addon (
+	id         INTEGER PRIMARY KEY,
+	project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+	kind       TEXT NOT NULL,
+	image      TEXT NOT NULL,
+	password   BLOB NOT NULL,
+	created_at INTEGER NOT NULL,
+	UNIQUE (project_id, kind)
+);
 `}
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -503,6 +513,65 @@ func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("token %d: %w", id, ErrNotFound)
+	}
+	return nil
+}
+
+// Addon is a stateful resource attached to a project, such as a Postgres server.
+type Addon struct {
+	ProjectID int64
+	Kind      string
+	// Image is the pinned image the add-on was created with. Upgrades are explicit.
+	Image     string
+	Password  string
+	CreatedAt time.Time
+}
+
+// AddAddon attaches an add-on to a project. A project has at most one of each kind.
+func (s *Store) AddAddon(ctx context.Context, a Addon) error {
+	_, err := s.db.ExecContext(ctx,
+		"INSERT INTO addon (project_id, kind, image, password, created_at) VALUES (?, ?, ?, ?, ?)",
+		a.ProjectID, a.Kind, a.Image, s.box.Seal([]byte(a.Password)), time.Now().Unix())
+	if err != nil {
+		return fmt.Errorf("store: add %s: %w", a.Kind, err)
+	}
+	return nil
+}
+
+// Addons returns a project's add-ons ordered by kind.
+func (s *Store) Addons(ctx context.Context, projectID int64) ([]Addon, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT project_id, kind, image, password, created_at FROM addon WHERE project_id = ? ORDER BY kind", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Addon
+	for rows.Next() {
+		var a Addon
+		var sealed []byte
+		var created int64
+		if err := rows.Scan(&a.ProjectID, &a.Kind, &a.Image, &sealed, &created); err != nil {
+			return nil, err
+		}
+		pw, err := s.box.Open(sealed)
+		if err != nil {
+			return nil, fmt.Errorf("add-on %s: %w", a.Kind, err)
+		}
+		a.Password, a.CreatedAt = string(pw), time.Unix(created, 0)
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// RemoveAddon detaches an add-on.
+func (s *Store) RemoveAddon(ctx context.Context, projectID int64, kind string) error {
+	res, err := s.db.ExecContext(ctx, "DELETE FROM addon WHERE project_id = ? AND kind = ?", projectID, kind)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("add-on %s: %w", kind, ErrNotFound)
 	}
 	return nil
 }

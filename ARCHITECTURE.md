@@ -107,9 +107,6 @@ volumes = ["uploads:/data/uploads"]
 command = "node src/worker.ts"
 volumes = ["uploads:/data/uploads"]
 
-[addons.postgres]
-version = "18"
-
 [env]
 BETTER_AUTH_SECRET = { generate = "base64:32" }
 DB_APP_PASSWORD    = { generate = "hex:32", to = [] }   # only feeds the template below
@@ -124,7 +121,8 @@ Rules:
 
 - An env key without `to` reaches every service and the release step. `to` narrows it (invariant 5); `to = []` makes it template-only.
 - `generate` values are created once, on first deploy, and shown in the UI; they never change unless the user regenerates them.
-- `template` resolves `${KEY}`, `${postgres.<host|port|user|password|db|url>}` and `${<service>.url}` at release time. `${postgres.url}` is the superuser URL; scope it.
+- `template` resolves `${KEY}`, `${postgres.<host|port|user|password|db|url>}`, `${redis.<host|port|password|url>}` and `${<service>.url}` at release time. `${postgres.url}` is the superuser URL; scope it.
+- Add-ons are not declared here: they are attached in Kayly (§8) and inject their variable (`DATABASE_URL`, `REDIS_URL`) into every target. Declaring that key in `[env]` takes it over, so leryo keeps its DML-only `DATABASE_URL`.
 - Only declared keys are delivered. A stored value whose key is no longer in `[env]` is ignored and reported, so deleting a line from the file can never leak a secret to every service.
 - A `command` replaces the image's entrypoint and command, and runs without a shell (words are split like a shell would split them). Use `sh -c '…'` for pipes, `&&` or `$VAR` expansion. Without `command` the image runs as built.
 - Unknown keys are an error, not a warning. The parser reports file, line and the nearest valid key.
@@ -174,16 +172,25 @@ Because live containers are only replaced after the switch and the proxy config 
 
 `ponytail:` every port service shares `kayly-edge`, so services of different projects can reach each other by name. Fine while one owner runs all projects; isolate per project before Kayly hosts strangers' apps.
 
-## 8. Add-ons: Postgres
+## 8. Add-ons: Postgres and Redis
 
-- Image `postgres:<version>-alpine`, pinned by digest in the binary, data in volume `kayly_<project>_postgres`, initdb with `--locale-provider=builtin --builtin-locale=C.UTF-8`.
-- Kayly generates the superuser password. Apps reach it only through `${postgres.*}` templates, scoped like any other variable.
-- Backups (v0.1): nightly `pg_dump -Fc` via `docker exec`, then each project volume as a tarball through a helper container, in that order (database first: leryo's file retention depends on it), uploaded to any S3-compatible bucket. Retention 7 daily, 4 weekly. A weekly job restores the latest dump into a throwaway container and runs a query; failure shows on the project page.
+One click (UI) or `kayly addons add <kind>` attaches an add-on to a project, like a Vercel integration: Kayly starts it, generates its password and injects its URL. A project has at most one add-on of each kind.
+
+| Kind | Image (pinned by digest) | Reached at | Injects |
+|---|---|---|---|
+| `postgres` | `postgres:18.6-alpine`, initdb with `--locale-provider=builtin --builtin-locale=C.UTF-8` | `postgres:5432`, database = project name | `DATABASE_URL` (superuser) |
+| `redis` | `valkey/valkey:9.1.2-alpine` (BSD, Redis-compatible), append-only file on | `redis:6379` | `REDIS_URL` |
+
+- Add-ons live on the project network only, data in volume `kayly_<project>_<kind>`. The image is recorded per add-on, so upgrading Kayly never upgrades a database.
+- They are not part of releases: deploys wait until add-ons are healthy, the reconciler restarts a vanished one and never removes one. Removing an add-on (typed confirmation) deletes its data; backups stay.
+- Services receive a new add-on on their next deploy, or at once with `kayly redeploy` (a release of the live image with current env, no build).
+- **Backups:** `pg_dump -Fc` before every release step (a bad migration can always be undone), daily, and on demand; 14 kept per project in `/var/lib/kayly/backups/<project>`, downloadable from the UI and CLI.
+- `ponytail:` backups stay on the server's disk: they cover mistakes and bad migrations, not a lost server. Off-site copies (S3) and restore drills come next. Volumes (leryo's uploads) are not backed up yet.
 
 ## 9. API, UI, CLI, MCP
 
 - **API:** JSON over HTTP under `/api/v1`, SSE for logs and status. Handlers are thin; logic lives in the domain packages. Errors have one shape: `{ "error": { "code", "message", "hint" } }`. `hint` tells the user what to do next.
-- **Auth:** v0.1 has one owner. `install.sh` prints a one-time claim URL; the owner sets an email and password (argon2id). The browser gets an HttpOnly session cookie; the CLI and MCP use API tokens, stored hashed.
+- **Auth:** v0.1 has one owner and API tokens only, stored hashed. `install.sh` prints one. The browser signs in with a token and gets it back as an HttpOnly, Secure, SameSite=Strict cookie; cookie-authenticated writes also need an `X-Kayly-Request` header.
 - **UI:** React 19 + Vite + TanStack Router/Query + Tailwind v4, built into `web/dist` and embedded with `go:embed`. Three screens: projects, new project, project (releases · logs · env · domains · settings).
 - **CLI:** `kayly login <url>`, `kayly init`, `kayly deploy` (tarball of the working tree minus `.gitignore`), `kayly logs [service]`, `kayly rollback [release]`, `kayly env set|ls|rm`, `kayly status`.
 - **MCP:** the same operations as the CLI, served by the daemon at `/mcp`, authorized with an API token.
@@ -196,9 +203,8 @@ internal/config/      kayly.toml: parse, validate, defaults, env resolution
 internal/store/       SQLite: migrations, queries (database/sql, hand-written SQL)
 internal/docker/      deploy.Runtime on the Docker Engine API (moby client)
 internal/build/       buildx + railpack invocation, log streaming
-internal/deploy/      pipeline, rollback, per-project lock, reconciler
+internal/deploy/      pipeline, rollback, redeploy, reconciler, add-ons, backups
 internal/proxy/       Caddy JSON generation (pure) + admin API client
-internal/addon/       postgres lifecycle and backups
 internal/secret/      encryption, generators
 internal/api/         HTTP handlers, auth, SSE, MCP
 web/                  UI (pnpm, Vite); `dist/` embedded

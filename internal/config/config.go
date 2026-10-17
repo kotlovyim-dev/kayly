@@ -29,7 +29,6 @@ type Config struct {
 	Build    Build              `toml:"build"`
 	Release  *Release           `toml:"release"`
 	Services map[string]Service `toml:"services"`
-	Addons   Addons             `toml:"addons"`
 	Env      map[string]EnvVar  `toml:"env"`
 }
 
@@ -77,16 +76,6 @@ func (v *Volume) UnmarshalText(b []byte) error {
 	}
 	v.Name, v.Path = name, p
 	return nil
-}
-
-// Addons are stateful resources that outlive releases.
-type Addons struct {
-	Postgres *Postgres `toml:"postgres"`
-}
-
-// Postgres is a project-scoped PostgreSQL server.
-type Postgres struct {
-	Version string `toml:"version"`
 }
 
 // EnvVar declares one environment variable. At most one of Generate and Template is set;
@@ -147,8 +136,13 @@ var (
 // ValidName reports whether name can name a project, service or volume.
 func ValidName(name string) bool { return nameRe.MatchString(name) }
 
-// addonNames are reserved: template references use them as namespaces.
-var addonNames = []string{"postgres"}
+// AddonFields lists, per add-on kind, the ${<kind>.<field>} references a template may use.
+// Add-ons are attached to a project in Kayly (`kayly add <kind>`), not in this file; their
+// kinds are reserved as service names because templates use them as namespaces.
+var AddonFields = map[string][]string{
+	"postgres": {"host", "port", "user", "password", "db", "url"},
+	"redis":    {"host", "port", "password", "url"},
+}
 
 func (c *Config) validate() error {
 	var errs []error
@@ -175,7 +169,7 @@ func (c *Config) validate() error {
 		switch {
 		case !nameRe.MatchString(name):
 			fail("services.%s: name must match %s", name, nameRe)
-		case name == ReleaseTarget || slices.Contains(addonNames, name):
+		case name == ReleaseTarget || AddonFields[name] != nil:
 			fail("services.%s: name is reserved", name)
 		}
 		if err := checkCommand(s.Command); err != nil {
@@ -193,11 +187,6 @@ func (c *Config) validate() error {
 				fail("services.%s.volumes: %s mounted twice", name, v.Path)
 			}
 			seen[v.Path] = true
-		}
-	}
-	if pg := c.Addons.Postgres; pg != nil {
-		if pg.Version == "" {
-			fail("addons.postgres.version is required")
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(c.Env)) {

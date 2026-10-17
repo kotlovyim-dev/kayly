@@ -46,6 +46,8 @@ type harness struct {
 	px  *fakeProxy
 	d   *Deployer
 	dir string
+	// backups is the Deployer's BackupDir.
+	backups string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -64,7 +66,7 @@ func newHarness(t *testing.T) *harness {
 	must(t, st.SetEnv(ctx, p.ID, "API_KEY", "key-1"))
 	must(t, st.SetEnv(ctx, p.ID, "ADMIN", "root"))
 
-	h := &harness{t: t, st: st, rt: newFakeRuntime(), px: &fakeProxy{}, dir: t.TempDir()}
+	h := &harness{t: t, st: st, rt: newFakeRuntime(), px: &fakeProxy{}, dir: t.TempDir(), backups: t.TempDir()}
 	h.writeConfig(app)
 	h.d = h.newDeployer()
 	return h
@@ -78,6 +80,7 @@ func (h *harness) newDeployer() *Deployer {
 		Proxy:         proxy.Options{AdminListen: "unix//run/caddy.sock"},
 		HealthTimeout: 300 * time.Millisecond,
 		KeepImages:    2,
+		BackupDir:     h.backups,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	d.checkHealth = h.rt.health
 	d.settle = 0
@@ -115,7 +118,7 @@ func (h *harness) assertLive(seq int) {
 		h.t.Errorf("active release = r%d (%s), want r%d live (err: %v)", rel.Seq, rel.Status, seq, err)
 	}
 	want := []string{ContainerName("app", "web", seq), ContainerName("app", "worker", seq)}
-	if got := h.rt.names(); !slices.Equal(got, want) {
+	if got := h.rt.serviceNames(); !slices.Equal(got, want) {
 		h.t.Errorf("containers = %v, want %v", got, want)
 	}
 	if !h.px.routesTo(ContainerName("app", "web", seq) + ":3000") {

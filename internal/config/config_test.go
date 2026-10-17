@@ -27,9 +27,6 @@ read_only = true
 command = "node src/worker.ts"
 volumes = ["uploads:/data/uploads"]
 
-[addons.postgres]
-version = "18"
-
 [env]
 BETTER_AUTH_SECRET = { generate = "base64:32" }
 DB_APP_PASSWORD    = { generate = "hex:32", to = [] }
@@ -65,6 +62,7 @@ func TestParseErrors(t *testing.T) {
 		{"bad service name", "[services.Web]\n", "name must match"},
 		{"reserved release", "[services.release]\n", "reserved"},
 		{"reserved addon", "[services.postgres]\n", "reserved"},
+		{"reserved redis", "[services.redis]\n", "reserved"},
 		{"port range", "[services.web]\nport = 70000\n", "out of range"},
 		{"health without port", "[services.web]\nhealth = \"/h\"\n", "needs a port"},
 		{"health not a path", svc + "health = \"h\"\n", "needs a port"},
@@ -75,7 +73,6 @@ func TestParseErrors(t *testing.T) {
 		{"dockerfile absolute", svc + "[build]\ndockerfile = \"/etc/passwd\"\n", "inside the app"},
 		{"target without dockerfile", svc + "[build]\ntarget = \"app\"\n", "needs build.dockerfile"},
 		{"empty release", svc + "[release]\ncommand = \" \"\n", "release.command is empty"},
-		{"postgres version", svc + "[addons.postgres]\n", "version is required"},
 		{"env key", svc + "[env]\nlower = {}\n", "name must match"},
 		{"generate format", svc + "[env]\nK = { generate = \"hex\" }\n", "want hex:N"},
 		{"generate and template", svc + "[env]\nK = { generate = \"hex:8\", template = \"x\" }\n", "exclusive"},
@@ -83,8 +80,9 @@ func TestParseErrors(t *testing.T) {
 		{"unknown target", svc + "[env]\nK = { to = [\"api\"] }\n", "not a service"},
 		{"undeclared ref", svc + "[env]\nK = { template = \"${X}\" }\n", "not declared"},
 		{"bad ref", svc + "[env]\nK = { template = \"${x}\" }\n", "want ${KEY}"},
-		{"ref without addon", svc + "[env]\nK = { template = \"${postgres.url}\" }\n", "no [addons.postgres]"},
-		{"bad postgres field", svc + "[addons.postgres]\nversion = \"18\"\n[env]\nK = { template = \"${postgres.pass}\" }\n", "postgres fields are"},
+		{"bad postgres field", svc + "[env]\nK = { template = \"${postgres.pass}\" }\n", "postgres fields are"},
+		{"bad redis field", svc + "[env]\nK = { template = \"${redis.db}\" }\n", "redis fields are"},
+		{"addons are not configured here", svc + "[addons.postgres]\nversion = \"18\"\n", "unknown key"},
 		{"url of worker", "[services.w]\n[env]\nK = { template = \"${w.url}\" }\n", "only services with a port"},
 		{"cycle", svc + "[env]\nA = { template = \"${B}\" }\nB = { template = \"${A}\" }\n", "template cycle A → B → A"},
 		{"syntax", "[services.web\n", "kayly.toml:1"},
@@ -116,11 +114,14 @@ func TestResolveEnvLeryo(t *testing.T) {
 		"postgres.url":  "postgres://postgres:admin@leryo-postgres:5432/postgres",
 		"app.url":       "https://leryo.example.com",
 	}
-	env, ignored, err := c.ResolveEnv(stored, refs)
+	// The add-on's DATABASE_URL is superuser; leryo declares its own, which wins.
+	injected := map[string]string{"DATABASE_URL": refs["postgres.url"], "PGHOST": "leryo-postgres"}
+	env, ignored, err := c.ResolveEnv(stored, refs, injected)
 	if err != nil {
 		t.Fatal(err)
 	}
 	common := map[string]string{
+		"PGHOST":             "leryo-postgres",
 		"BETTER_AUTH_SECRET": "s3cret",
 		"DATABASE_URL":       "postgres://leryo_app:pw@leryo-postgres:5432/leryo",
 		"WEB_ORIGIN":         "https://leryo.example.com",
@@ -144,7 +145,7 @@ func TestResolveEnvMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = c.ResolveEnv(map[string]string{}, nil)
+	_, _, err = c.ResolveEnv(map[string]string{}, nil, nil)
 	var me *MissingError
 	if !errors.As(err, &me) || strings.Join(me.Keys, ",") != "BETTER_AUTH_SECRET,DB_APP_PASSWORD,SMTP_URL" {
 		t.Fatalf("err = %v", err)
@@ -163,7 +164,7 @@ PATH = { template = "v1" }
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, _, err := c.ResolveEnv(map[string]string{"HOST": "h"}, nil)
+	env, _, err := c.ResolveEnv(map[string]string{"HOST": "h"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +181,40 @@ func TestResolveEnvMissingRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := c.ResolveEnv(nil, nil); err == nil || !strings.Contains(err.Error(), "${web.url} has no value") {
+	if _, _, err := c.ResolveEnv(nil, nil, nil); err == nil || !strings.Contains(err.Error(), "${web.url} has no value") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResolveEnvMissingAddon(t *testing.T) {
+	c, err := Parse([]byte("[services.web]\n[env]\nU = { template = \"${redis.url}\" }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.ResolveEnv(nil, nil, nil); err == nil || !strings.Contains(err.Error(), "kayly add redis") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestInjectedEnvGoesEverywhereUnlessDeclared(t *testing.T) {
+	c, err := Parse([]byte("[release]\ncommand = \"m\"\n[services.web]\n[services.worker]\n[env]\nREDIS_URL = { template = \"${redis.url}\", to = [\"worker\"] }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	injected := map[string]string{"REDIS_URL": "redis://r", "DATABASE_URL": "postgres://p"}
+	env, _, err := c.ResolveEnv(nil, map[string]string{"redis.url": "redis://r"}, injected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"web", "worker", "release"} {
+		if env[target]["DATABASE_URL"] != "postgres://p" {
+			t.Errorf("%s: DATABASE_URL missing", target)
+		}
+	}
+	if _, ok := env["web"]["REDIS_URL"]; ok {
+		t.Error("a declared key reached a target outside its `to`")
+	}
+	if env["worker"]["REDIS_URL"] != "redis://r" {
+		t.Error("worker: REDIS_URL missing")
 	}
 }

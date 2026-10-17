@@ -42,6 +42,8 @@ type Options struct {
 	ReleaseTimeout time.Duration
 	// KeepImages is how many past images stay for instant rollback. Default 3.
 	KeepImages int
+	// BackupDir holds database dumps, one directory per project. Empty disables backups.
+	BackupDir string
 }
 
 // Deployer runs deploys, rollbacks and reconciliation. It is safe for concurrent use;
@@ -119,9 +121,6 @@ func (d *Deployer) Deploy(ctx context.Context, project, dir string, w io.Writer)
 	if err != nil {
 		return store.Release{}, err
 	}
-	if cfg.Addons.Postgres != nil {
-		return store.Release{}, errors.New("addons.postgres: not supported yet")
-	}
 	rel, err := d.store.CreateRelease(ctx, p.ID, raw)
 	if err != nil {
 		return store.Release{}, err
@@ -129,19 +128,19 @@ func (d *Deployer) Deploy(ctx context.Context, project, dir string, w io.Writer)
 	log := d.log.With("project", p.Name, "release", rel.Seq)
 	log.Info("deploy started")
 
-	if err := d.deploy(ctx, p, &rel, cfg, dir, w); err != nil {
-		// Cleanup must run even if the deploy was cancelled.
-		cctx := context.WithoutCancel(ctx)
-		d.removeRelease(cctx, p.Name, rel.Seq, cfg)
-		if ferr := d.store.Fail(cctx, rel.ID, err.Error()); ferr != nil {
-			log.Error("record failed release", "err", ferr)
+	build := func(image string) error {
+		step(w, "build")
+		err := d.builder.Build(ctx, BuildSpec{
+			Dir: dir, Dockerfile: cfg.Build.Dockerfile, Target: cfg.Build.Target,
+			Image: image, CacheKey: p.Name,
+		}, w)
+		if err != nil {
+			return fmt.Errorf("build: %w", err)
 		}
-		// A non-overlapping service of the live release may have been stopped already.
-		if rerr := d.reconcileProject(cctx, p.Name); rerr != nil {
-			log.Error("restore live release", "err", rerr)
-		}
-		fmt.Fprintf(w, "\n✗ r%d failed: %v\n", rel.Seq, err)
-		log.Warn("deploy failed", "err", err)
+		return nil
+	}
+	if err := d.release(ctx, p, &rel, cfg, build, w); err != nil {
+		d.abandon(ctx, p, rel, cfg, err, w)
 		return rel, err
 	}
 	fmt.Fprintf(w, "\n✓ r%d is live\n", rel.Seq)
@@ -150,21 +149,35 @@ func (d *Deployer) Deploy(ctx context.Context, project, dir string, w io.Writer)
 	return rel, nil
 }
 
-func (d *Deployer) deploy(ctx context.Context, p store.Project, rel *store.Release, cfg *config.Config, dir string, w io.Writer) error {
+// abandon cleans up after a release that failed before going live: its containers go, it is
+// recorded as failed, and the live release is restored if anything of it was stopped.
+func (d *Deployer) abandon(ctx context.Context, p store.Project, rel store.Release, cfg *config.Config, cause error, w io.Writer) {
+	// Cleanup must run even if the deploy was cancelled.
+	ctx = context.WithoutCancel(ctx)
+	log := d.log.With("project", p.Name, "release", rel.Seq)
+	d.removeRelease(ctx, p.Name, rel.Seq, cfg)
+	if err := d.store.Fail(ctx, rel.ID, cause.Error()); err != nil {
+		log.Error("record failed release", "err", err)
+	}
+	// A non-overlapping service of the live release may have been stopped already.
+	if err := d.reconcileProject(ctx, p.Name); err != nil {
+		log.Error("restore live release", "err", err)
+	}
+	fmt.Fprintf(w, "\n✗ r%d failed: %v\n", rel.Seq, cause)
+	log.Warn("release failed", "err", cause)
+}
+
+// release takes a created release through every step: env, image (from makeImage), add-ons,
+// backup, release step, start, health and switch.
+func (d *Deployer) release(ctx context.Context, p store.Project, rel *store.Release, cfg *config.Config, makeImage func(image string) error, w io.Writer) error {
 	// Env first: a missing value fails in a second, not after a build of several minutes.
 	env, err := d.resolveEnv(ctx, p, cfg, w)
 	if err != nil {
 		return err
 	}
-
-	step(w, "build")
 	rel.Image = ImageName(p.Name, rel.Seq)
-	err = d.builder.Build(ctx, BuildSpec{
-		Dir: dir, Dockerfile: cfg.Build.Dockerfile, Target: cfg.Build.Target,
-		Image: rel.Image, CacheKey: p.Name,
-	}, w)
-	if err != nil {
-		return fmt.Errorf("build: %w", err)
+	if err := makeImage(rel.Image); err != nil {
+		return err
 	}
 	if err := d.store.SetBuilt(ctx, rel.ID, rel.Image, env); err != nil {
 		return err
@@ -174,7 +187,19 @@ func (d *Deployer) deploy(ctx context.Context, p store.Project, rel *store.Relea
 	if err := d.ensureInfra(ctx, p.Name, cfg); err != nil {
 		return err
 	}
+	if err := d.ensureAddons(ctx, p, true); err != nil {
+		return err
+	}
 	if cfg.Release != nil {
+		// A migration that goes wrong can always be undone from this dump.
+		if d.hasAddon(ctx, p, "postgres") {
+			step(w, "backup before the release step")
+			b, err := d.backup(ctx, p, fmt.Sprintf("before-r%d", rel.Seq))
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "%s (%d KB)\n", b.Name, b.Size/1024)
+		}
 		step(w, "release: "+cfg.Release.Command)
 		if err := d.runRelease(ctx, p.Name, *rel, cfg, w); err != nil {
 			return fmt.Errorf("release step: %w", err)
@@ -445,13 +470,16 @@ func (d *Deployer) resolveEnv(ctx context.Context, p store.Project, cfg *config.
 	if err != nil {
 		return nil, err
 	}
-	refs := map[string]string{}
+	refs, injected, err := d.addonEnv(ctx, p)
+	if err != nil {
+		return nil, err
+	}
 	for name, s := range cfg.Services {
 		if hosts := d.hosts(p.Name, name, domains); s.Port != 0 && len(hosts) > 0 {
 			refs[name+".url"] = "https://" + hosts[0]
 		}
 	}
-	env, ignored, err := cfg.ResolveEnv(stored, refs)
+	env, ignored, err := cfg.ResolveEnv(stored, refs, injected)
 	if err != nil {
 		var me *config.MissingError
 		if errors.As(err, &me) {
@@ -516,4 +544,94 @@ func (d *Deployer) Logs(ctx context.Context, project, service string, follow boo
 			strings.Join(slices.Sorted(maps.Keys(cfg.Services)), ", "))
 	}
 	return d.rt.Logs(ctx, ContainerName(project, service, rel.Seq), follow, tail, w)
+}
+
+// Redeploy releases the live image again with the current env and add-ons, without a
+// build: a new release that runs the release step and switches like any other. Use it
+// after changing env values or adding an add-on.
+func (d *Deployer) Redeploy(ctx context.Context, project string, w io.Writer) (store.Release, error) {
+	l := d.projectLock(project)
+	l.Lock()
+	defer l.Unlock()
+	w = &syncWriter{w: w}
+
+	p, err := d.store.Project(ctx, project)
+	if err != nil {
+		return store.Release{}, err
+	}
+	if p.ActiveRelease == 0 {
+		return store.Release{}, fmt.Errorf("%s has no live release to redeploy; run kayly deploy", project)
+	}
+	live, err := d.store.ReleaseByID(ctx, p.ActiveRelease)
+	if err != nil {
+		return store.Release{}, err
+	}
+	cfg, err := config.Parse(live.Config)
+	if err != nil {
+		return store.Release{}, err
+	}
+	rel, err := d.store.CreateRelease(ctx, p.ID, live.Config)
+	if err != nil {
+		return store.Release{}, err
+	}
+	// Each release owns its tag, so pruning r(n) never removes the image of r(n+1).
+	retag := func(image string) error {
+		step(w, fmt.Sprintf("reuse the image of r%d", live.Seq))
+		return d.rt.TagImage(ctx, live.Image, image)
+	}
+	if err := d.release(ctx, p, &rel, cfg, retag, w); err != nil {
+		d.abandon(ctx, p, rel, cfg, err, w)
+		return rel, err
+	}
+	fmt.Fprintf(w, "\n✓ r%d is live\n", rel.Seq)
+	rel.Status = store.StatusLive
+	return rel, nil
+}
+
+func (d *Deployer) hasAddon(ctx context.Context, p store.Project, kind string) bool {
+	addons, err := d.store.Addons(ctx, p.ID)
+	return err == nil && slices.ContainsFunc(addons, func(a store.Addon) bool { return a.Kind == kind })
+}
+
+// ServiceView is a service of the live release and where it is reachable.
+type ServiceView struct {
+	Name    string   `json:"name"`
+	Port    int      `json:"port,omitempty"`
+	Command string   `json:"command,omitempty"`
+	URLs    []string `json:"urls"`
+}
+
+// Services lists the services of the live release, by name.
+func (d *Deployer) Services(ctx context.Context, project string) ([]ServiceView, error) {
+	p, err := d.store.Project(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	out := []ServiceView{}
+	if p.ActiveRelease == 0 {
+		return out, nil
+	}
+	rel, err := d.store.ReleaseByID(ctx, p.ActiveRelease)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := config.Parse(rel.Config)
+	if err != nil {
+		return nil, err
+	}
+	domains, err := d.store.Domains(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range slices.Sorted(maps.Keys(cfg.Services)) {
+		s := cfg.Services[name]
+		v := ServiceView{Name: name, Port: s.Port, Command: s.Command, URLs: []string{}}
+		if s.Port != 0 {
+			for _, h := range d.hosts(project, name, domains) {
+				v.URLs = append(v.URLs, "https://"+h)
+			}
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }

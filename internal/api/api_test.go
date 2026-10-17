@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 
 	"github.com/kotlovyim-dev/kayly/internal/deploy"
 	"github.com/kotlovyim-dev/kayly/internal/proxy"
@@ -122,6 +123,10 @@ func newEnv(t *testing.T) *env {
 	// The handlers under test never reach the runtime or the builder.
 	d := deploy.New(st, nil, nil, px, deploy.Options{Proxy: proxy.Options{AdminListen: "unix//x.sock"}}, log)
 	s := New(st, d, t.TempDir(), log)
+	s.UI = fstest.MapFS{
+		"index.html":      {Data: []byte("<!doctype html>ui")},
+		"assets/app-1.js": {Data: []byte("js")},
+	}
 	return &env{t: t, trusted: s.Handler(true), public: s.Handler(false), px: px}
 }
 
@@ -202,5 +207,49 @@ func TestDeployRejectsBadArchive(t *testing.T) {
 	code, body := e.do(e.trusted, "POST", "/api/v1/projects/app/deploys", "not an archive", "")
 	if code != 400 || !strings.Contains(body, "bad_source") {
 		t.Fatalf("%d %s", code, body)
+	}
+}
+
+func TestSessionAndUI(t *testing.T) {
+	e := newEnv(t)
+	_, body := e.do(e.trusted, "POST", "/api/v1/tokens", `{"name":"browser"}`, "")
+	var tok TokenView
+	json.Unmarshal([]byte(body), &tok)
+
+	// The UI and its assets need no session; unknown paths get the app.
+	for path, want := range map[string]string{"/": "ui", "/projects/x": "ui", "/assets/app-1.js": "js"} {
+		if code, out := e.do(e.public, "GET", path, "", ""); code != 200 || !strings.Contains(out, want) {
+			t.Errorf("GET %s = %d %q", path, code, out)
+		}
+	}
+
+	if code, _ := e.do(e.public, "POST", "/api/v1/session", `{"token":"kayly_bad"}`, ""); code != 401 {
+		t.Fatalf("login with a bad token: %d", code)
+	}
+	rec := httptest.NewRecorder()
+	e.public.ServeHTTP(rec, httptest.NewRequest("POST", "/api/v1/session", strings.NewReader(`{"token":"`+tok.Token+`"}`)))
+	cookies := rec.Result().Cookies()
+	if rec.Code != 204 || len(cookies) != 1 || !cookies[0].HttpOnly || !cookies[0].Secure || cookies[0].SameSite != http.SameSiteStrictMode {
+		t.Fatalf("login: %d %+v", rec.Code, cookies)
+	}
+
+	call := func(method, path string, csrf bool) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(`{"name":"x"}`))
+		req.AddCookie(cookies[0])
+		if csrf {
+			req.Header.Set(csrfHeader, "1")
+		}
+		rec := httptest.NewRecorder()
+		e.public.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := call("GET", "/api/v1/projects", false); code != 200 {
+		t.Errorf("GET with session: %d", code)
+	}
+	if code := call("POST", "/api/v1/projects", false); code != 403 {
+		t.Errorf("POST with session but no CSRF header: %d", code)
+	}
+	if code := call("POST", "/api/v1/projects", true); code != 201 {
+		t.Errorf("POST with session and CSRF header: %d", code)
 	}
 }

@@ -132,8 +132,15 @@ func (d *Deployer) converge(ctx context.Context, p store.Project, have []Contain
 	}
 
 	var errs []error
+	// Add-ons are not part of releases: keep them running, and never remove them here.
+	if err := d.ensureAddons(ctx, p, false); err != nil {
+		errs = append(errs, err)
+	}
 	alive := map[string]bool{}
 	for _, c := range have {
+		if c.Labels[LabelRole] == RoleAddon {
+			continue
+		}
 		if _, ok := want[c.Name]; ok && (c.Running || c.Restarting) {
 			alive[c.Name] = true
 			continue

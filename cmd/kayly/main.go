@@ -20,6 +20,7 @@ import (
 
 	"github.com/kotlovyim-dev/kayly/internal/api"
 	"github.com/kotlovyim-dev/kayly/internal/config"
+	"github.com/kotlovyim-dev/kayly/internal/deploy"
 )
 
 const usage = `kayly deploys apps to your own server.
@@ -36,8 +37,11 @@ Anywhere:
   kayly releases [-p project]               list releases
   kayly rollback <release> [-p project]     make an earlier release live again
   kayly logs <service> [-p project] [-f] [-n lines]
+  kayly redeploy [-p project]               release the live image again with current env and add-ons
   kayly env ls | set KEY=value... | rm KEY... [-p project]
   kayly domains ls | add <hostname> <service> | rm <hostname> [-p project]
+  kayly addons ls | add <postgres|redis> | rm <kind> [-p project]
+  kayly backups ls | create | get <name> [-p project]
 
 The project defaults to the directory name. On the server, the CLI talks to the daemon's
 admin socket (in $KAYLY_RUN, default /run/kayly) and needs no login.
@@ -182,6 +186,16 @@ func runClientCommand(cmd string, args []string) error {
 		defer resp.Body.Close()
 		_, err = io.Copy(os.Stdout, resp.Body)
 		return err
+	case "redeploy":
+		name, err := proj(".")
+		if err != nil {
+			return err
+		}
+		return c.stream(ctx, "/api/v1/projects/"+name+"/redeploy", "", nil)
+	case "addons":
+		return c.addons(ctx, proj, pos)
+	case "backups":
+		return c.backups(ctx, proj, pos)
 	case "env":
 		return c.env(ctx, proj, pos)
 	case "domains":
@@ -230,6 +244,94 @@ func (c *client) env(ctx context.Context, proj func(string) (string, error), pos
 		return nil
 	}
 	return errors.New("usage: kayly env ls | set KEY=value [KEY=value] | rm KEY [KEY]")
+}
+
+func (c *client) addons(ctx context.Context, proj func(string) (string, error), pos []string) error {
+	name, err := proj(".")
+	if err != nil {
+		return err
+	}
+	base := "/api/v1/projects/" + name + "/addons"
+	show := func(as []deploy.AddonView) error {
+		tw := table()
+		fmt.Fprintln(tw, "ADD-ON\tSTATUS\tSERVICES GET\tIMAGE")
+		for _, a := range as {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", a.Kind, a.Status, a.EnvVar, a.Image)
+		}
+		return tw.Flush()
+	}
+	switch {
+	case len(pos) == 0 || pos[0] == "ls":
+		var as []deploy.AddonView
+		if err := c.do(ctx, "GET", base, nil, &as); err != nil {
+			return err
+		}
+		return show(as)
+	case pos[0] == "add" && len(pos) == 2:
+		fmt.Printf("starting %s…\n", pos[1])
+		var as []deploy.AddonView
+		if err := c.do(ctx, "POST", base, map[string]string{"kind": pos[1]}, &as); err != nil {
+			return err
+		}
+		if err := show(as); err != nil {
+			return err
+		}
+		fmt.Println("\nServices get it on the next deploy; `kayly redeploy` applies it now.")
+		return nil
+	case pos[0] == "rm" && len(pos) == 2:
+		fmt.Printf("This deletes the %s add-on of %s and all its data (backups are kept).\nType the project name to confirm: ", pos[1], name)
+		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if strings.TrimSpace(answer) != name {
+			return errors.New("not confirmed; nothing deleted")
+		}
+		return c.do(ctx, "DELETE", base+"/"+pos[1], nil, nil)
+	}
+	return errors.New("usage: kayly addons ls | add <postgres|redis> | rm <kind>")
+}
+
+func (c *client) backups(ctx context.Context, proj func(string) (string, error), pos []string) error {
+	name, err := proj(".")
+	if err != nil {
+		return err
+	}
+	base := "/api/v1/projects/" + name + "/backups"
+	switch {
+	case len(pos) == 0 || pos[0] == "ls":
+		var bs []deploy.Backup
+		if err := c.do(ctx, "GET", base, nil, &bs); err != nil {
+			return err
+		}
+		tw := table()
+		fmt.Fprintln(tw, "BACKUP\tSIZE")
+		for _, b := range bs {
+			fmt.Fprintf(tw, "%s\t%d KB\n", b.Name, b.Size/1024)
+		}
+		return tw.Flush()
+	case pos[0] == "create":
+		var b deploy.Backup
+		if err := c.do(ctx, "POST", base, nil, &b); err != nil {
+			return err
+		}
+		fmt.Printf("%s (%d KB)\n", b.Name, b.Size/1024)
+		return nil
+	case pos[0] == "get" && len(pos) == 2:
+		resp, err := c.request(ctx, "GET", base+"/"+url.PathEscape(pos[1]), "", nil)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		f, err := os.OpenFile(name+"-"+filepath.Base(pos[1]), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(f, resp.Body); err != nil {
+			f.Close()
+			return err
+		}
+		fmt.Printf("saved %s; restore with: pg_restore --clean --no-owner -d <database url> %s\n", f.Name(), f.Name())
+		return f.Close()
+	}
+	return errors.New("usage: kayly backups ls | create | get <name>")
 }
 
 func (c *client) domains(ctx context.Context, proj func(string) (string, error), pos []string) error {

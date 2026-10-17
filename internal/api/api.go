@@ -10,9 +10,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -32,6 +35,8 @@ type Server struct {
 	// workDir is where uploaded sources are unpacked for a build.
 	workDir string
 	log     *slog.Logger
+	// UI holds the built web UI (index.html at its root), served on the public listener.
+	UI fs.FS
 }
 
 // New returns a Server. workDir must exist.
@@ -45,7 +50,15 @@ func (s *Server) Handler(trusted bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/projects", s.listProjects)
 	mux.HandleFunc("POST /api/v1/projects", s.createProject)
+	mux.HandleFunc("GET /api/v1/projects/{project}", s.getProject)
 	mux.HandleFunc("GET /api/v1/projects/{project}/releases", s.listReleases)
+	mux.HandleFunc("POST /api/v1/projects/{project}/redeploy", s.redeploy)
+	mux.HandleFunc("GET /api/v1/projects/{project}/addons", s.listAddons)
+	mux.HandleFunc("POST /api/v1/projects/{project}/addons", s.addAddon)
+	mux.HandleFunc("DELETE /api/v1/projects/{project}/addons/{kind}", s.removeAddon)
+	mux.HandleFunc("GET /api/v1/projects/{project}/backups", s.listBackups)
+	mux.HandleFunc("POST /api/v1/projects/{project}/backups", s.createBackup)
+	mux.HandleFunc("GET /api/v1/projects/{project}/backups/{name}", s.downloadBackup)
 	mux.HandleFunc("POST /api/v1/projects/{project}/deploys", s.deploy)
 	mux.HandleFunc("POST /api/v1/projects/{project}/rollback", s.rollback)
 	mux.HandleFunc("GET /api/v1/projects/{project}/logs", s.logs)
@@ -61,12 +74,35 @@ func (s *Server) Handler(trusted bool) http.Handler {
 		mux.HandleFunc("DELETE /api/v1/tokens/{id}", s.deleteToken)
 		return mux
 	}
-	return s.requireToken(mux)
+	root := http.NewServeMux()
+	root.HandleFunc("POST /api/v1/session", s.login)
+	root.HandleFunc("DELETE /api/v1/session", s.logout)
+	root.Handle("/api/", s.requireToken(mux))
+	if s.UI != nil {
+		root.Handle("/", uiHandler(s.UI))
+	}
+	return root
 }
+
+// sessionCookie carries an API token for the web UI.
+const sessionCookie = "kayly_session"
+
+// csrfHeader must accompany every cookie-authenticated request that changes something. A
+// cross-site form cannot set it, and the cookie is SameSite=Strict besides.
+const csrfHeader = "X-Kayly-Request"
 
 func (s *Server) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok {
+			if c, err := r.Cookie(sessionCookie); err == nil {
+				tok, ok = c.Value, true
+				if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get(csrfHeader) == "" {
+					writeError(w, http.StatusForbidden, "csrf", "missing "+csrfHeader+" header", "")
+					return
+				}
+			}
+		}
 		if ok {
 			valid, err := s.store.CheckToken(r.Context(), tok)
 			if err != nil {
@@ -81,6 +117,55 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r)
+	})
+}
+
+// login trades an API token for a session cookie.
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	ok, err := s.store.CheckToken(r.Context(), strings.TrimSpace(body.Token))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "this token is not valid",
+			"create one on the server with `kayly token create <name>`")
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: sessionCookie, Value: strings.TrimSpace(body.Token), Path: "/",
+		MaxAge: 30 * 24 * 3600, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// uiHandler serves the single-page UI: files as they are, any other path as index.html.
+// Hashed assets are cached for good; everything else is revalidated.
+func uiHandler(ui fs.FS) http.Handler {
+	files := http.FileServerFS(ui)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if strings.HasPrefix(name, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		if fi, err := fs.Stat(ui, name); name == "" || err != nil || fi.IsDir() {
+			http.ServeFileFS(w, r, ui, "index.html")
+			return
+		}
+		files.ServeHTTP(w, r)
 	})
 }
 
@@ -138,6 +223,140 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, ProjectView{Name: p.Name, CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339)})
 }
 
+// ProjectDetail is everything the project page shows at once.
+type ProjectDetail struct {
+	ProjectView
+	Services []deploy.ServiceView `json:"services"`
+	Addons   []deploy.AddonView   `json:"addons"`
+	Releases []ReleaseView        `json:"releases"`
+	Domains  []DomainView         `json:"domains"`
+	EnvKeys  []string             `json:"env_keys"`
+}
+
+func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p, ok := s.project(w, r)
+	if !ok {
+		return
+	}
+	d := ProjectDetail{ProjectView: ProjectView{Name: p.Name, CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339)}}
+	var err error
+	if d.Services, err = s.deployer.Services(ctx, p.Name); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if d.Addons, err = s.deployer.Addons(ctx, p.Name); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	rels, err := s.store.Releases(ctx, p.ID, 20)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	d.Releases = []ReleaseView{}
+	for _, rel := range rels {
+		d.Releases = append(d.Releases, releaseView(rel))
+		if rel.ID == p.ActiveRelease {
+			d.LiveSeq, d.LiveSince = rel.Seq, rel.CreatedAt.UTC().Format(time.RFC3339)
+		}
+	}
+	ds, err := s.store.Domains(ctx, p.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	d.Domains = []DomainView{}
+	for _, dm := range ds {
+		d.Domains = append(d.Domains, DomainView{Hostname: dm.Hostname, Service: dm.Service})
+	}
+	env, err := s.store.Env(ctx, p.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	d.EnvKeys = slices.Sorted(maps.Keys(env))
+	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) redeploy(w http.ResponseWriter, r *http.Request) {
+	stream := newStream(w)
+	rel, err := s.deployer.Redeploy(context.WithoutCancel(r.Context()), r.PathValue("project"), stream)
+	stream.end(Result{OK: err == nil, Release: rel.Seq, Error: errString(err)})
+}
+
+func (s *Server) listAddons(w http.ResponseWriter, r *http.Request) {
+	as, err := s.deployer.Addons(r.Context(), r.PathValue("project"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, as)
+}
+
+func (s *Server) addAddon(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Kind string `json:"kind"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	// Pulling an image and starting a database outlive an impatient client.
+	if _, err := s.deployer.AddAddon(context.WithoutCancel(r.Context()), r.PathValue("project"), body.Kind); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	as, err := s.deployer.Addons(r.Context(), r.PathValue("project"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, as)
+}
+
+func (s *Server) removeAddon(w http.ResponseWriter, r *http.Request) {
+	if err := s.deployer.RemoveAddon(r.Context(), r.PathValue("project"), r.PathValue("kind")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) listBackups(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.project(w, r); !ok {
+		return
+	}
+	bs, err := s.deployer.Backups(r.PathValue("project"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, bs)
+}
+
+func (s *Server) createBackup(w http.ResponseWriter, r *http.Request) {
+	b, err := s.deployer.BackupNow(context.WithoutCancel(r.Context()), r.PathValue("project"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, b)
+}
+
+func (s *Server) downloadBackup(w http.ResponseWriter, r *http.Request) {
+	path, err := s.deployer.BackupPath(r.PathValue("project"), r.PathValue("name"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Disposition", `attachment; filename="`+r.PathValue("project")+"-"+r.PathValue("name")+`"`)
+	http.ServeFile(w, r, path)
+}
+
+func releaseView(rel store.Release) ReleaseView {
+	return ReleaseView{Seq: rel.Seq, Status: rel.Status, Error: rel.Error, CreatedAt: rel.CreatedAt.UTC().Format(time.RFC3339)}
+}
+
 // ReleaseView is a release as the API shows it.
 type ReleaseView struct {
 	Seq       int    `json:"seq"`
@@ -158,7 +377,7 @@ func (s *Server) listReleases(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []ReleaseView{}
 	for _, rel := range rels {
-		out = append(out, ReleaseView{Seq: rel.Seq, Status: rel.Status, Error: rel.Error, CreatedAt: rel.CreatedAt.UTC().Format(time.RFC3339)})
+		out = append(out, releaseView(rel))
 	}
 	writeJSON(w, http.StatusOK, out)
 }

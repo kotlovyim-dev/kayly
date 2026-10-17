@@ -39,6 +39,7 @@ type paths struct{ data, run string }
 func (p paths) db() string          { return filepath.Join(p.data, "kayly.db") }
 func (p paths) key() string         { return filepath.Join(p.data, "master.key") }
 func (p paths) builds() string      { return filepath.Join(p.data, "builds") }
+func (p paths) backups() string     { return filepath.Join(p.data, "backups") }
 func (p paths) caddyConfig() string { return filepath.Join(p.data, "caddy.json") }
 func (p paths) proxyDir() string    { return filepath.Join(p.run, "proxy") }
 func (p paths) caddySock() string   { return filepath.Join(p.proxyDir(), "caddy.sock") }
@@ -74,7 +75,7 @@ func serve(args []string) error {
 			return fmt.Errorf("--run %s is too long: unix socket paths are limited to 107 bytes", *run)
 		}
 	}
-	for _, dir := range []string{p.data, p.builds(), p.proxyDir()} {
+	for _, dir := range []string{p.data, p.builds(), p.backups(), p.proxyDir()} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
 		}
@@ -122,6 +123,7 @@ func serve(args []string) error {
 			BaseDomain:  *base,
 			Proxy:       proxy.Options{AdminListen: adminListen, Email: *email},
 			ExtraRoutes: []proxy.Route{{Host: *domain, Upstream: "unix/" + p.publicSock()}},
+			BackupDir:   p.backups(),
 		}, log)
 
 	if err := waitForSocket(ctx, p.caddySock(), time.Minute); err != nil {
@@ -166,6 +168,7 @@ func serve(args []string) error {
 			if err := ensureProxy(ctx, rt, p, adminListen); err != nil {
 				log.Error("ensure proxy", "err", err)
 			}
+			d.DailyBackups(ctx)
 		}
 	}()
 	log.Info("kayly serving", "api", "https://"+*domain, "admin_socket", adminSock(*run))

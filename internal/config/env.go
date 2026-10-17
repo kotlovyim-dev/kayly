@@ -12,9 +12,6 @@ import (
 
 var refRe = regexp.MustCompile(`\$\{([^}]*)\}`)
 
-// PostgresFields are the ${postgres.<field>} references a template may use.
-var PostgresFields = []string{"host", "port", "user", "password", "db", "url"}
-
 // refs returns the names inside ${...} in order of appearance.
 func refs(tmpl string) []string {
 	var out []string
@@ -34,13 +31,10 @@ func (c *Config) checkRef(ref string) error {
 	name, field, ok := strings.Cut(ref, ".")
 	switch {
 	case !ok:
-		return fmt.Errorf("${%s}: want ${KEY}, ${postgres.<field>} or ${<service>.url}", ref)
-	case name == "postgres":
-		if c.Addons.Postgres == nil {
-			return fmt.Errorf("${%s}: no [addons.postgres]", ref)
-		}
-		if !slices.Contains(PostgresFields, field) {
-			return fmt.Errorf("${%s}: postgres fields are %s", ref, strings.Join(PostgresFields, ", "))
+		return fmt.Errorf("${%s}: want ${KEY}, ${<add-on>.<field>} or ${<service>.url}", ref)
+	case AddonFields[name] != nil:
+		if !slices.Contains(AddonFields[name], field) {
+			return fmt.Errorf("${%s}: %s fields are %s", ref, name, strings.Join(AddonFields[name], ", "))
 		}
 	default:
 		s, ok := c.Services[name]
@@ -105,11 +99,15 @@ func (e *MissingError) Error() string {
 
 // ResolveEnv computes the environment of every target.
 //
-// stored holds the values kept by Kayly: user-set and generated ones. refs holds addon and
-// service fields such as "postgres.url" and "app.url". Only keys declared in [env] are
-// delivered, each only to its targets. Stored keys that are not declared are returned as
-// ignored, so the caller can warn about them.
-func (c *Config) ResolveEnv(stored, refs map[string]string) (env map[string]map[string]string, ignored []string, err error) {
+// stored holds the values kept by Kayly: user-set and generated ones. refs holds add-on and
+// service fields such as "postgres.url" and "app.url". injected holds the variables the
+// attached add-ons provide, such as DATABASE_URL.
+//
+// Declared keys are delivered by their [env] rules. Injected keys that are not declared go
+// to every target; declaring one (to scope it, or to template it) takes it over. Stored
+// keys that are not declared are not delivered and are returned as ignored, so the caller
+// can warn about them.
+func (c *Config) ResolveEnv(stored, refs, injected map[string]string) (env map[string]map[string]string, ignored []string, err error) {
 	values := map[string]string{}
 	var missing []string
 	for key, e := range c.Env {
@@ -147,6 +145,11 @@ func (c *Config) ResolveEnv(stored, refs map[string]string) (env map[string]map[
 	env = map[string]map[string]string{}
 	for _, t := range c.Targets() {
 		env[t] = map[string]string{}
+		for k, v := range injected {
+			if _, declared := c.Env[k]; !declared {
+				env[t][k] = v
+			}
+		}
 	}
 	for key, v := range values {
 		to := c.Env[key].To
@@ -179,7 +182,12 @@ func (c *Config) expand(key string, values, refs map[string]string) (string, err
 		}
 		v, ok := refs[ref]
 		if !ok {
-			errs = append(errs, fmt.Errorf("env.%s: ${%s} has no value", key, ref))
+			kind, _, _ := strings.Cut(ref, ".")
+			if AddonFields[kind] != nil {
+				errs = append(errs, fmt.Errorf("env.%s: ${%s}: the project has no %s add-on; add one with `kayly add %s`", key, ref, kind, kind))
+			} else {
+				errs = append(errs, fmt.Errorf("env.%s: ${%s} has no value", key, ref))
+			}
 		}
 		return v
 	})

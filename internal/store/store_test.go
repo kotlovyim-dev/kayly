@@ -187,3 +187,27 @@ func TestTokens(t *testing.T) {
 		t.Error("revoked token accepted")
 	}
 }
+
+func TestAddons(t *testing.T) {
+	ctx := context.Background()
+	s, _ := open(t)
+	p, _ := s.CreateProject(ctx, "app")
+	must(t, s.AddAddon(ctx, Addon{ProjectID: p.ID, Kind: "redis", Image: "valkey", Password: "pw-redis"}))
+	must(t, s.AddAddon(ctx, Addon{ProjectID: p.ID, Kind: "postgres", Image: "postgres", Password: "pw-pg"}))
+	if err := s.AddAddon(ctx, Addon{ProjectID: p.ID, Kind: "redis", Image: "valkey", Password: "x"}); err == nil {
+		t.Error("a second redis was attached")
+	}
+	as, err := s.Addons(ctx, p.ID)
+	if err != nil || len(as) != 2 || as[0].Kind != "postgres" || as[0].Password != "pw-pg" {
+		t.Fatalf("addons = %+v, %v", as, err)
+	}
+	var raw []byte
+	must(t, s.db.QueryRowContext(ctx, "SELECT password FROM addon WHERE kind = 'redis'").Scan(&raw))
+	if bytes.Contains(raw, []byte("pw-redis")) {
+		t.Error("add-on password stored in plaintext")
+	}
+	must(t, s.RemoveAddon(ctx, p.ID, "redis"))
+	if err := s.RemoveAddon(ctx, p.ID, "redis"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("second remove: %v", err)
+	}
+}
