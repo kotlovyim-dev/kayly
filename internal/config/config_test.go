@@ -86,6 +86,12 @@ func TestParseErrors(t *testing.T) {
 		{"url of worker", "[services.w]\n[env]\nK = { template = \"${w.url}\" }\n", "only services with a port"},
 		{"cycle", svc + "[env]\nA = { template = \"${B}\" }\nB = { template = \"${A}\" }\n", "template cycle A → B → A"},
 		{"syntax", "[services.web\n", "kayly.toml:1"},
+		{"port format", "[services.rtc]\nports = [\"7882\"]\n", "want <1-65535>/tcp"},
+		{"port proto", "[services.rtc]\nports = [\"7882/sctp\"]\n", "want <1-65535>/tcp"},
+		{"proxy port", "[services.rtc]\nports = [\"443/tcp\"]\n", "belongs to the proxy"},
+		{"proxy http3", "[services.rtc]\nports = [\"443/udp\"]\n", "belongs to the proxy"},
+		{"port twice", "[services.a]\nports = [\"3478/udp\"]\n[services.b]\nports = [\"3478/udp\"]\n", "published twice"},
+		{"ports and overlap", "[services.rtc]\nports = [\"7881/tcp\"]\noverlap = true\n", "cannot overlap"},
 		{"unterminated quote", "[services.web]\ncommand = \"sh -c 'x\"\n", "services.web.command"},
 	}
 	for _, tt := range tests {
@@ -216,5 +222,19 @@ func TestInjectedEnvGoesEverywhereUnlessDeclared(t *testing.T) {
 	}
 	if env["worker"]["REDIS_URL"] != "redis://r" {
 		t.Error("worker: REDIS_URL missing")
+	}
+}
+
+func TestHostPorts(t *testing.T) {
+	c, err := Parse([]byte("[services.rtc]\nport = 7880\nports = [\"7881/tcp\", \"7882/udp\", \"3478/udp\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtc := c.Services["rtc"]
+	if len(rtc.Ports) != 3 || rtc.Ports[1] != (HostPort{7882, "udp"}) {
+		t.Errorf("ports = %v", rtc.Ports)
+	}
+	if rtc.Overlaps() {
+		t.Error("a service with host ports must not overlap")
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/kballard/go-shellquote"
@@ -57,10 +58,33 @@ type Service struct {
 	Overlap *bool `toml:"overlap"`
 	// ReadOnly mounts the root filesystem read-only, with a tmpfs on /tmp.
 	ReadOnly bool `toml:"read_only"`
+	// Ports are published on the host at the same numbers, for traffic the HTTP proxy cannot
+	// carry (media, TURN, game servers). A service with ports never overlaps: two containers
+	// cannot bind one host port.
+	Ports []HostPort `toml:"ports"`
 }
 
 // Overlaps reports whether old and new containers may run at the same time.
-func (s Service) Overlaps() bool { return s.Overlap == nil || *s.Overlap }
+func (s Service) Overlaps() bool { return len(s.Ports) == 0 && (s.Overlap == nil || *s.Overlap) }
+
+// HostPort is a port published on every host interface, e.g. "7882/udp".
+type HostPort struct {
+	Port  int
+	Proto string
+}
+
+// UnmarshalText parses "<port>/<tcp|udp>".
+func (p *HostPort) UnmarshalText(b []byte) error {
+	num, proto, ok := strings.Cut(string(b), "/")
+	n, err := strconv.Atoi(num)
+	if !ok || err != nil || n < 1 || n > 65535 || (proto != "tcp" && proto != "udp") {
+		return fmt.Errorf("port %q: want <1-65535>/tcp or <1-65535>/udp", b)
+	}
+	p.Port, p.Proto = n, proto
+	return nil
+}
+
+func (p HostPort) String() string { return strconv.Itoa(p.Port) + "/" + p.Proto }
 
 // Volume is a named, project-scoped volume mounted into a service.
 type Volume struct {
@@ -164,6 +188,7 @@ func (c *Config) validate() error {
 	if len(c.Services) == 0 {
 		fail("no [services.<name>] defined")
 	}
+	published := map[HostPort]bool{}
 	for _, name := range slices.Sorted(maps.Keys(c.Services)) {
 		s := c.Services[name]
 		switch {
@@ -187,6 +212,18 @@ func (c *Config) validate() error {
 				fail("services.%s.volumes: %s mounted twice", name, v.Path)
 			}
 			seen[v.Path] = true
+		}
+		if len(s.Ports) > 0 && s.Overlap != nil && *s.Overlap {
+			fail("services.%s.overlap: a service with host ports cannot overlap", name)
+		}
+		for _, p := range s.Ports {
+			switch {
+			case p.Port == 80 || p.Port == 443: // 443/udp carries the proxy's HTTP/3
+				fail("services.%s.ports: %s belongs to the proxy; use port and a domain", name, p)
+			case published[p]:
+				fail("services.%s.ports: %s is published twice", name, p)
+			}
+			published[p] = true
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(c.Env)) {

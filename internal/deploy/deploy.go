@@ -404,6 +404,9 @@ func (d *Deployer) serviceSpecs(project string, rel store.Release, cfg *config.C
 		for _, v := range s.Volumes {
 			spec.Mounts = append(spec.Mounts, Mount{Volume: VolumeName(project, v.Name), Path: v.Path})
 		}
+		for _, p := range s.Ports {
+			spec.Ports = append(spec.Ports, Port{Host: p.Port, Container: p.Port, Proto: p.Proto})
+		}
 		specs = append(specs, spec)
 	}
 	return specs

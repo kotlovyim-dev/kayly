@@ -488,3 +488,30 @@ func TestMissingEnvFailsBeforeBuild(t *testing.T) {
 		t.Fatalf("err = %v, built = %v: a missing value must fail before the build", err, built)
 	}
 }
+
+// A service with host ports is replaced, not overlapped: its old container frees the ports
+// before the new one binds them.
+func TestHostPortsReplaceInsteadOfOverlap(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(strings.Replace(app, "[services.worker]", "[services.worker]\nports = [\"7882/udp\"]", 1))
+	h.mustDeploy()
+	h.rt.mu.Lock()
+	got := h.rt.containers["app_worker_r1"].spec.Ports
+	h.rt.mu.Unlock()
+	if len(got) != 1 || got[0] != (Port{Host: 7882, Container: 7882, Proto: "udp"}) {
+		t.Fatalf("ports = %+v", got)
+	}
+
+	var order []string
+	h.rt.hook = func(method, arg string) error {
+		if (method == "Run" || method == "Remove") && strings.Contains(arg, "worker") {
+			order = append(order, method+" "+arg)
+		}
+		return nil
+	}
+	h.mustDeploy()
+	if !slices.Equal(order[:2], []string{"Remove app_worker_r1", "Run app_worker_r2"}) {
+		t.Errorf("order = %v, want the old worker removed before the new one starts", order)
+	}
+	h.assertLive(2)
+}
