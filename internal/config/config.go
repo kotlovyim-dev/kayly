@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kballard/go-shellquote"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -152,8 +153,12 @@ func (c *Config) validate() error {
 	if c.Build.Target != "" && c.Build.Dockerfile == "" {
 		fail("build.target needs build.dockerfile")
 	}
-	if c.Release != nil && strings.TrimSpace(c.Release.Command) == "" {
-		fail("release.command is empty")
+	if c.Release != nil {
+		if strings.TrimSpace(c.Release.Command) == "" {
+			fail("release.command is empty")
+		} else if err := checkCommand(c.Release.Command); err != nil {
+			fail("release.command: %v", err)
+		}
 	}
 	if len(c.Services) == 0 {
 		fail("no [services.<name>] defined")
@@ -165,6 +170,9 @@ func (c *Config) validate() error {
 			fail("services.%s: name must match %s", name, nameRe)
 		case name == ReleaseTarget || slices.Contains(addonNames, name):
 			fail("services.%s: name is reserved", name)
+		}
+		if err := checkCommand(s.Command); err != nil {
+			fail("services.%s.command: %v", name, err)
 		}
 		if s.Port < 0 || s.Port > 65535 {
 			fail("services.%s.port: %d is out of range", name, s.Port)
@@ -213,6 +221,13 @@ func (c *Config) validate() error {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+// checkCommand rejects commands that do not split into words. Commands run without a
+// shell; use `sh -c '...'` for pipes, && and variable expansion.
+func checkCommand(cmd string) error {
+	_, err := shellquote.Split(cmd)
+	return err
 }
 
 func (c *Config) checkTargets(where string, targets []string, fail func(string, ...any)) {

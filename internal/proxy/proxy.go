@@ -92,7 +92,9 @@ type (
 			TLS *tlsApp `json:"tls,omitempty"`
 		} `json:"apps"`
 	}
-	admin  struct{ Listen string `json:"listen"` }
+	admin struct {
+		Listen string `json:"listen"`
+	}
 	server struct {
 		Listen []string `json:"listen"`
 		Routes []route  `json:"routes"`
@@ -102,7 +104,9 @@ type (
 		Handle   []handler `json:"handle"`
 		Terminal bool      `json:"terminal"`
 	}
-	match   struct{ Host []string `json:"host"` }
+	match struct {
+		Host []string `json:"host"`
+	}
 	handler struct {
 		Handler       string              `json:"handler"`
 		Encodings     map[string]struct{} `json:"encodings,omitempty"`
@@ -110,11 +114,19 @@ type (
 		Upstreams     []upstream          `json:"upstreams,omitempty"`
 		FlushInterval int                 `json:"flush_interval,omitempty"`
 	}
-	upstream   struct{ Dial string `json:"dial"` }
-	tlsApp     struct{ Automation automation `json:"automation"` }
-	automation struct{ Policies []policy `json:"policies"` }
-	policy     struct{ Issuers []issuer `json:"issuers"` }
-	issuer     struct {
+	upstream struct {
+		Dial string `json:"dial"`
+	}
+	tlsApp struct {
+		Automation automation `json:"automation"`
+	}
+	automation struct {
+		Policies []policy `json:"policies"`
+	}
+	policy struct {
+		Issuers []issuer `json:"issuers"`
+	}
+	issuer struct {
 		Module string `json:"module"`
 		Email  string `json:"email,omitempty"`
 	}

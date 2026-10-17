@@ -86,6 +86,7 @@ func TestParseErrors(t *testing.T) {
 		{"url of worker", "[services.w]\n[env]\nK = { template = \"${w.url}\" }\n", "only services with a port"},
 		{"cycle", svc + "[env]\nA = { template = \"${B}\" }\nB = { template = \"${A}\" }\n", "template cycle A → B → A"},
 		{"syntax", "[services.web\n", "kayly.toml:1"},
+		{"unterminated quote", "[services.web]\ncommand = \"sh -c 'x\"\n", "services.web.command"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
