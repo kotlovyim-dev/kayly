@@ -71,6 +71,8 @@ func TestParseErrors(t *testing.T) {
 		{"volume relative", svc + "volumes = [\"data:data\"]\n", "name:/absolute/path"},
 		{"volume unclean", svc + "volumes = [\"data:/a/../b\"]\n", "name:/absolute/path"},
 		{"volume twice", svc + "volumes = [\"a:/d\", \"b:/d\"]\n", "mounted twice"},
+		{"dockerfile outside", svc + "[build]\ndockerfile = \"../Dockerfile\"\n", "inside the app"},
+		{"dockerfile absolute", svc + "[build]\ndockerfile = \"/etc/passwd\"\n", "inside the app"},
 		{"target without dockerfile", svc + "[build]\ntarget = \"app\"\n", "needs build.dockerfile"},
 		{"empty release", svc + "[release]\ncommand = \" \"\n", "release.command is empty"},
 		{"postgres version", svc + "[addons.postgres]\n", "version is required"},

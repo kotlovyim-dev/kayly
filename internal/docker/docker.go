@@ -1,0 +1,245 @@
+// Package docker implements deploy.Runtime with the Docker Engine API.
+package docker
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"slices"
+	"strconv"
+	"time"
+
+	cerrdefs "github.com/containerd/errdefs"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
+
+	"github.com/kotlovyim-dev/kayly/internal/deploy"
+)
+
+// Runtime is a deploy.Runtime backed by a Docker daemon.
+type Runtime struct {
+	c *client.Client
+}
+
+var _ deploy.Runtime = (*Runtime)(nil)
+
+// New connects to the Docker daemon configured by the environment (DOCKER_HOST, or the
+// default socket) and checks that it answers.
+func New(ctx context.Context) (*Runtime, error) {
+	c, err := client.New(client.FromEnv)
+	if err != nil {
+		return nil, fmt.Errorf("docker: %w", err)
+	}
+	if _, err := c.Ping(ctx, client.PingOptions{}); err != nil {
+		c.Close()
+		return nil, fmt.Errorf("docker: daemon not reachable: %w", err)
+	}
+	return &Runtime{c: c}, nil
+}
+
+// Close releases the client's connections.
+func (r *Runtime) Close() error { return r.c.Close() }
+
+// EnsureNetwork creates a bridge network unless it exists.
+func (r *Runtime) EnsureNetwork(ctx context.Context, name string) error {
+	if _, err := r.c.NetworkInspect(ctx, name, client.NetworkInspectOptions{}); err == nil {
+		return nil
+	} else if !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("docker: inspect network %s: %w", name, err)
+	}
+	_, err := r.c.NetworkCreate(ctx, name, client.NetworkCreateOptions{Driver: "bridge"})
+	if err != nil && !cerrdefs.IsConflict(err) { // created concurrently
+		return fmt.Errorf("docker: create network %s: %w", name, err)
+	}
+	return nil
+}
+
+// EnsureVolume creates a local volume unless it exists. Creating an existing volume is a
+// no-op in Docker.
+func (r *Runtime) EnsureVolume(ctx context.Context, name string) error {
+	if _, err := r.c.VolumeCreate(ctx, client.VolumeCreateOptions{Name: name}); err != nil {
+		return fmt.Errorf("docker: create volume %s: %w", name, err)
+	}
+	return nil
+}
+
+// Run creates and starts a container with Kayly's hardening defaults: all capabilities
+// dropped (CapAdd excepted), no privilege escalation, rotated logs.
+func (r *Runtime) Run(ctx context.Context, s deploy.Spec) error {
+	env := make([]string, 0, len(s.Env))
+	for _, k := range slices.Sorted(maps.Keys(s.Env)) {
+		env = append(env, k+"="+s.Env[k])
+	}
+	restart := container.RestartPolicy{Name: container.RestartPolicyDisabled}
+	if s.Restart {
+		restart.Name = container.RestartPolicyUnlessStopped
+	}
+	host := &container.HostConfig{
+		RestartPolicy:  restart,
+		CapDrop:        []string{"ALL"},
+		CapAdd:         s.CapAdd,
+		SecurityOpt:    []string{"no-new-privileges:true"},
+		ReadonlyRootfs: s.ReadOnly,
+		LogConfig: container.LogConfig{
+			Type:   "json-file",
+			Config: map[string]string{"max-size": "10m", "max-file": "5"},
+		},
+	}
+	if s.ReadOnly {
+		host.Tmpfs = map[string]string{"/tmp": ""}
+	}
+	for _, m := range s.Mounts {
+		host.Mounts = append(host.Mounts, mount.Mount{Type: mount.TypeVolume, Source: m.Volume, Target: m.Path})
+	}
+	netcfg := &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{}}
+	for _, n := range s.Networks {
+		netcfg.EndpointsConfig[n.Name] = &network.EndpointSettings{Aliases: n.Aliases}
+	}
+	if len(s.Networks) > 0 {
+		host.NetworkMode = container.NetworkMode(s.Networks[0].Name)
+	}
+
+	res, err := r.c.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name: s.Name,
+		Config: &container.Config{
+			Image:  s.Image,
+			Cmd:    s.Cmd,
+			Env:    env,
+			Labels: s.Labels,
+		},
+		HostConfig:       host,
+		NetworkingConfig: netcfg,
+	})
+	if err != nil {
+		return fmt.Errorf("docker: create %s: %w", s.Name, err)
+	}
+	if _, err := r.c.ContainerStart(ctx, res.ID, client.ContainerStartOptions{}); err != nil {
+		// Do not leave a created-but-stopped container holding the name.
+		r.c.ContainerRemove(context.WithoutCancel(ctx), res.ID, client.ContainerRemoveOptions{Force: true})
+		return fmt.Errorf("docker: start %s: %w", s.Name, err)
+	}
+	return nil
+}
+
+// Wait blocks until the container stops and returns its exit code.
+func (r *Runtime) Wait(ctx context.Context, name string) (int, error) {
+	res := r.c.ContainerWait(ctx, name, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+	select {
+	case w := <-res.Result:
+		if w.Error != nil {
+			return 0, fmt.Errorf("docker: wait %s: %s", name, w.Error.Message)
+		}
+		return int(w.StatusCode), nil
+	case err := <-res.Error:
+		return 0, fmt.Errorf("docker: wait %s: %w", name, err)
+	}
+}
+
+// Logs copies the container's stdout and stderr to w.
+func (r *Runtime) Logs(ctx context.Context, name string, follow bool, tail int, w io.Writer) error {
+	opts := client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Follow: follow, Tail: "all"}
+	if tail > 0 {
+		opts.Tail = strconv.Itoa(tail)
+	}
+	rc, err := r.c.ContainerLogs(ctx, name, opts)
+	if err != nil {
+		return fmt.Errorf("docker: logs %s: %w", name, err)
+	}
+	defer rc.Close()
+	// Containers run without a TTY, so the stream is multiplexed.
+	if _, err := stdcopy.StdCopy(w, w, rc); err != nil && !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("docker: logs %s: %w", name, err)
+	}
+	return nil
+}
+
+// Inspect returns the state of a container, or deploy.ErrNoContainer.
+func (r *Runtime) Inspect(ctx context.Context, name string) (deploy.Container, error) {
+	res, err := r.c.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
+	if cerrdefs.IsNotFound(err) {
+		return deploy.Container{}, fmt.Errorf("%s: %w", name, deploy.ErrNoContainer)
+	}
+	if err != nil {
+		return deploy.Container{}, fmt.Errorf("docker: inspect %s: %w", name, err)
+	}
+	ci := res.Container
+	c := deploy.Container{Name: name, RestartCount: ci.RestartCount}
+	if ci.Config != nil {
+		c.Labels = ci.Config.Labels
+	}
+	if st := ci.State; st != nil {
+		c.Running, c.Restarting, c.ExitCode = st.Running, st.Restarting, st.ExitCode
+		c.StartedAt, _ = time.Parse(time.RFC3339Nano, st.StartedAt)
+	}
+	if ci.NetworkSettings != nil {
+		if ep := ci.NetworkSettings.Networks[deploy.EdgeNetwork]; ep != nil && ep.IPAddress.IsValid() {
+			c.IP = ep.IPAddress.String()
+		}
+	}
+	return c, nil
+}
+
+// Remove stops a container with the given grace period, then removes it.
+func (r *Runtime) Remove(ctx context.Context, name string, grace time.Duration) error {
+	secs := int(grace.Seconds())
+	_, err := r.c.ContainerStop(ctx, name, client.ContainerStopOptions{Timeout: &secs})
+	if err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("docker: stop %s: %w", name, err)
+	}
+	_, err = r.c.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true})
+	if err != nil && !cerrdefs.IsNotFound(err) && !cerrdefs.IsConflict(err) { // conflict: removal already in progress
+		return fmt.Errorf("docker: remove %s: %w", name, err)
+	}
+	return nil
+}
+
+// List returns every container (running or not) labelled by Kayly.
+func (r *Runtime) List(ctx context.Context) ([]deploy.Container, error) {
+	res, err := r.c.ContainerList(ctx, client.ContainerListOptions{
+		All:     true,
+		Filters: client.Filters{}.Add("label", deploy.LabelProject),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("docker: list containers: %w", err)
+	}
+	out := make([]deploy.Container, 0, len(res.Items))
+	for _, s := range res.Items {
+		name := ""
+		if len(s.Names) > 0 {
+			name = s.Names[0][1:] // the API prefixes names with "/"
+		}
+		out = append(out, deploy.Container{
+			Name:       name,
+			Labels:     s.Labels,
+			Running:    s.State == container.StateRunning,
+			Restarting: s.State == container.StateRestarting,
+		})
+	}
+	return out, nil
+}
+
+// ImageExists reports whether ref is present locally.
+func (r *Runtime) ImageExists(ctx context.Context, ref string) (bool, error) {
+	_, err := r.c.ImageInspect(ctx, ref)
+	if cerrdefs.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("docker: inspect image %s: %w", ref, err)
+	}
+	return true, nil
+}
+
+// RemoveImage deletes a local image. A missing image is not an error.
+func (r *Runtime) RemoveImage(ctx context.Context, ref string) error {
+	_, err := r.c.ImageRemove(ctx, ref, client.ImageRemoveOptions{})
+	if err != nil && !cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("docker: remove image %s: %w", ref, err)
+	}
+	return nil
+}

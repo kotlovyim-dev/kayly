@@ -193,7 +193,7 @@ Because live containers are only replaced after the switch and the proxy config 
 cmd/kayly/            main: CLI commands and `serve`
 internal/config/      kayly.toml: parse, validate, defaults, env resolution
 internal/store/       SQLite: migrations, queries (database/sql, hand-written SQL)
-internal/runtime/     Docker: containers, networks, volumes, exec, logs (moby client)
+internal/docker/      deploy.Runtime on the Docker Engine API (moby client)
 internal/build/       buildx + railpack invocation, log streaming
 internal/deploy/      pipeline, rollback, per-project lock, reconciler
 internal/proxy/       Caddy JSON generation (pure) + admin API client
@@ -204,7 +204,7 @@ web/                  UI (pnpm, Vite); `dist/` embedded
 install.sh            host setup: docker, buildx, railpack, caddy container, systemd unit
 ```
 
-Dependency direction: `api → deploy → {build, runtime, proxy, addon} → store/config/secret`. Nothing imports `api`. `deploy` talks to Docker through a small `Runtime` interface so the pipeline and the reconciler are tested against an in-memory fake; `internal/runtime` is tested against a real Docker daemon in CI.
+Dependency direction: `api → deploy → {proxy, store, config, secret}`; `docker` and `build` implement interfaces defined in `deploy`. Nothing imports `api`. `deploy` talks to Docker through a small `Runtime` interface so the pipeline and the reconciler are tested against an in-memory fake; `internal/docker` and `internal/build` are tested against a real Docker daemon (`KAYLY_DOCKER_TESTS=1`, as in CI).
 
 ## 11. Quality bar
 

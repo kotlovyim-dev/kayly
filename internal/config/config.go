@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -152,6 +153,9 @@ func (c *Config) validate() error {
 
 	if c.Build.Target != "" && c.Build.Dockerfile == "" {
 		fail("build.target needs build.dockerfile")
+	}
+	if d := c.Build.Dockerfile; d != "" && !filepath.IsLocal(d) {
+		fail("build.dockerfile: %q must be a path inside the app", d)
 	}
 	if c.Release != nil {
 		if strings.TrimSpace(c.Release.Command) == "" {
