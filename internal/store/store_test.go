@@ -162,3 +162,28 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+func TestTokens(t *testing.T) {
+	ctx := context.Background()
+	s, _ := open(t)
+	tok, err := s.CreateToken(ctx, "laptop")
+	if err != nil || len(tok) < 40 {
+		t.Fatalf("token = %q, %v", tok, err)
+	}
+	if ok, _ := s.CheckToken(ctx, tok); !ok {
+		t.Error("valid token rejected")
+	}
+	if ok, _ := s.CheckToken(ctx, tok+"x"); ok {
+		t.Error("wrong token accepted")
+	}
+	var raw []byte
+	must(t, s.db.QueryRowContext(ctx, "SELECT hash FROM token").Scan(&raw))
+	if bytes.Contains(raw, []byte(tok)) {
+		t.Error("token stored in plaintext")
+	}
+	list, _ := s.Tokens(ctx)
+	must(t, s.DeleteToken(ctx, list[0].ID))
+	if ok, _ := s.CheckToken(ctx, tok); ok {
+		t.Error("revoked token accepted")
+	}
+}

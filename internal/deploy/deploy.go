@@ -490,3 +490,27 @@ func (s *syncWriter) Write(b []byte) (int, error) {
 	defer s.mu.Unlock()
 	return s.w.Write(b)
 }
+
+// Logs writes the output of a service of the live release to w.
+func (d *Deployer) Logs(ctx context.Context, project, service string, follow bool, tail int, w io.Writer) error {
+	p, err := d.store.Project(ctx, project)
+	if err != nil {
+		return err
+	}
+	if p.ActiveRelease == 0 {
+		return fmt.Errorf("%s has no live release", project)
+	}
+	rel, err := d.store.ReleaseByID(ctx, p.ActiveRelease)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Parse(rel.Config)
+	if err != nil {
+		return err
+	}
+	if _, ok := cfg.Services[service]; !ok {
+		return fmt.Errorf("r%d has no service %q (services: %s)", rel.Seq, service,
+			strings.Join(slices.Sorted(maps.Keys(cfg.Services)), ", "))
+	}
+	return d.rt.Logs(ctx, ContainerName(project, service, rel.Seq), follow, tail, w)
+}

@@ -144,6 +144,9 @@ var (
 	genRe    = regexp.MustCompile(`^(hex|base64):([1-9][0-9]*)$`)
 )
 
+// ValidName reports whether name can name a project, service or volume.
+func ValidName(name string) bool { return nameRe.MatchString(name) }
+
 // addonNames are reserved: template references use them as namespaces.
 var addonNames = []string{"postgres"}
 

@@ -4,7 +4,10 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -87,6 +90,14 @@ CREATE TABLE domain (
 	project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
 	service    TEXT NOT NULL,
 	created_at INTEGER NOT NULL
+);
+`, `
+CREATE TABLE token (
+	id           INTEGER PRIMARY KEY,
+	name         TEXT NOT NULL,
+	hash         BLOB NOT NULL UNIQUE,
+	created_at   INTEGER NOT NULL,
+	last_used_at INTEGER
 );
 `}
 
@@ -428,6 +439,70 @@ func (s *Store) RemoveDomain(ctx context.Context, hostname string) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("domain %s: %w", hostname, ErrNotFound)
+	}
+	return nil
+}
+
+// Token is an API token. Only its SHA-256 is stored.
+type Token struct {
+	ID        int64
+	Name      string
+	CreatedAt time.Time
+}
+
+// CreateToken generates a token, stores its hash and returns the plaintext once.
+func (s *Store) CreateToken(ctx context.Context, name string) (plaintext string, err error) {
+	buf := make([]byte, 32)
+	rand.Read(buf)
+	plaintext = "kayly_" + base64.RawURLEncoding.EncodeToString(buf)
+	sum := sha256.Sum256([]byte(plaintext))
+	_, err = s.db.ExecContext(ctx, "INSERT INTO token (name, hash, created_at) VALUES (?, ?, ?)",
+		name, sum[:], time.Now().Unix())
+	if err != nil {
+		return "", fmt.Errorf("store: create token: %w", err)
+	}
+	return plaintext, nil
+}
+
+// CheckToken reports whether plaintext is a known token and records its use.
+func (s *Store) CheckToken(ctx context.Context, plaintext string) (bool, error) {
+	sum := sha256.Sum256([]byte(plaintext))
+	res, err := s.db.ExecContext(ctx, "UPDATE token SET last_used_at = ? WHERE hash = ?", time.Now().Unix(), sum[:])
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// Tokens lists API tokens, oldest first.
+func (s *Store) Tokens(ctx context.Context) ([]Token, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT id, name, created_at FROM token ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Token
+	for rows.Next() {
+		var t Token
+		var created int64
+		if err := rows.Scan(&t.ID, &t.Name, &created); err != nil {
+			return nil, err
+		}
+		t.CreatedAt = time.Unix(created, 0)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// DeleteToken revokes a token.
+func (s *Store) DeleteToken(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, "DELETE FROM token WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("token %d: %w", id, ErrNotFound)
 	}
 	return nil
 }

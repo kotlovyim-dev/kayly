@@ -199,3 +199,10 @@ func (d *Deployer) loadProxy(ctx context.Context, override map[int64]store.Relea
 	}
 	return d.proxy.Load(ctx, cfg)
 }
+
+// ReloadProxy regenerates and loads the proxy config, e.g. after a domain change.
+func (d *Deployer) ReloadProxy(ctx context.Context) error {
+	d.proxyMu.Lock()
+	defer d.proxyMu.Unlock()
+	return d.loadProxy(ctx, nil)
+}
