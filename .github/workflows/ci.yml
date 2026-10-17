@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - uses: dominikh/staticcheck-action@v1.4.1
+        with:
+          install-go: false
+      - name: Unit tests
+        run: go test -race ./...
+
+  docker:
+    # Runtime and builder against a real Docker daemon, with the pinned Railpack.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install Railpack
+        run: |
+          curl -fsSL -o /tmp/railpack.tgz https://github.com/railwayapp/railpack/releases/download/v0.40.1/railpack-v0.40.1-x86_64-unknown-linux-musl.tar.gz
+          echo "2842de93e68713af9037e0bc0a398d7da78f3b96aa4804303a638db2bc69bd30  /tmp/railpack.tgz" | sha256sum -c
+          sudo tar -xzf /tmp/railpack.tgz -C /usr/local/bin railpack
+      - run: go test -count=1 ./internal/docker ./internal/build
+        env:
+          KAYLY_DOCKER_TESTS: "1"
+
+  install-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: shellcheck install.sh
