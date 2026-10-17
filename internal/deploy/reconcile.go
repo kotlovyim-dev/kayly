@@ -13,8 +13,9 @@ import (
 	"github.com/kotlovyim-dev/kayly/internal/store"
 )
 
-// Recover runs once when the daemon starts, before any deploy: releases interrupted by a
-// stop or crash are marked failed, then actual state is converged to desired state.
+// Recover runs once when the daemon starts, before it accepts any deploy: releases
+// interrupted by a stop or crash are marked failed. Call Reconcile afterwards (it may run
+// alongside new deploys) to remove what they left behind.
 func (d *Deployer) Recover(ctx context.Context) error {
 	failed, err := d.store.FailInterrupted(ctx)
 	if err != nil {
@@ -23,7 +24,7 @@ func (d *Deployer) Recover(ctx context.Context) error {
 	for _, r := range failed {
 		d.log.Warn("release interrupted by a daemon stop, marked failed", "project_id", r.ProjectID, "release", r.Seq)
 	}
-	return d.Reconcile(ctx)
+	return nil
 }
 
 // Loop reconciles every interval until ctx is done.
@@ -71,15 +72,17 @@ func (d *Deployer) Reconcile(ctx context.Context) error {
 
 	var errs []error
 	for _, p := range projects {
+		have := byProject[p.Name]
+		// Whatever happens below, these containers belong to a project that exists.
+		delete(byProject, p.Name)
 		l := d.projectLock(p.Name)
 		if !l.TryLock() {
 			continue // a deploy or rollback owns this project right now
 		}
-		if err := d.converge(ctx, p, byProject[p.Name]); err != nil {
+		if err := d.converge(ctx, p, have); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", p.Name, err))
 		}
 		l.Unlock()
-		delete(byProject, p.Name)
 	}
 	for _, name := range slices.Sorted(maps.Keys(byProject)) {
 		for _, c := range byProject[name] {

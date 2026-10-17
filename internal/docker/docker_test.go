@@ -154,3 +154,64 @@ func must(t *testing.T, err error) {
 		t.Fatal(err)
 	}
 }
+
+func TestEnsureContainer(t *testing.T) {
+	r := newRuntime(t)
+	ctx := context.Background()
+	name := unique(t, "infra")
+	spec := deploy.Spec{
+		Name: name, Image: testImage, Cmd: []string{"sleep", "600"}, Restart: true,
+		Labels: map[string]string{"x": "1"},
+		Ports:  []deploy.Port{{Host: 18765, Container: 80, Proto: "tcp"}},
+	}
+	t.Cleanup(func() { r.Remove(context.Background(), name, 0) })
+	must(t, r.EnsureContainer(ctx, spec))
+	first, err := r.Inspect(ctx, name)
+	if err != nil || !first.Running {
+		t.Fatalf("inspect = %+v, %v", first, err)
+	}
+	must(t, r.EnsureContainer(ctx, spec))
+	same, _ := r.Inspect(ctx, name)
+	if !same.StartedAt.Equal(first.StartedAt) {
+		t.Error("an unchanged spec recreated the container")
+	}
+	spec.Cmd = []string{"sleep", "601"}
+	must(t, r.EnsureContainer(ctx, spec))
+	changed, _ := r.Inspect(ctx, name)
+	if changed.StartedAt.Equal(first.StartedAt) || !changed.Running {
+		t.Error("a changed spec did not recreate the container")
+	}
+	if spec.Labels[LabelSpec] != "" {
+		t.Error("EnsureContainer mutated the caller's labels")
+	}
+}
+
+// A command replaces the image's entrypoint: Railpack images use ENTRYPOINT ["bash", "-c"].
+func TestCmdReplacesEntrypoint(t *testing.T) {
+	r := newRuntime(t)
+	ctx := context.Background()
+	img := fmt.Sprintf("kayly/entrypointtest:%d", time.Now().UnixNano())
+	build := exec.Command("docker", "build", "-q", "-t", img, "-")
+	build.Stdin = strings.NewReader("FROM " + testImage + "\nENTRYPOINT [\"/bin/sh\", \"-c\"]\nCMD [\"echo default\"]\n")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	t.Cleanup(func() { r.RemoveImage(context.Background(), img) })
+
+	for _, tt := range []struct {
+		cmd  []string
+		want string
+	}{
+		{nil, "default\n"},
+		{[]string{"echo", "two words"}, "two words\n"},
+	} {
+		name := unique(t, "ep")
+		must(t, r.Run(ctx, deploy.Spec{Name: name, Image: img, Cmd: tt.cmd}))
+		var logs bytes.Buffer
+		must(t, r.Logs(ctx, name, true, 0, &logs))
+		r.Remove(ctx, name, 0)
+		if logs.String() != tt.want {
+			t.Errorf("cmd %q: output %q, want %q", tt.cmd, logs.String(), tt.want)
+		}
+	}
+}

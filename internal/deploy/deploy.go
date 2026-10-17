@@ -151,19 +151,20 @@ func (d *Deployer) Deploy(ctx context.Context, project, dir string, w io.Writer)
 }
 
 func (d *Deployer) deploy(ctx context.Context, p store.Project, rel *store.Release, cfg *config.Config, dir string, w io.Writer) error {
+	// Env first: a missing value fails in a second, not after a build of several minutes.
+	env, err := d.resolveEnv(ctx, p, cfg, w)
+	if err != nil {
+		return err
+	}
+
 	step(w, "build")
 	rel.Image = ImageName(p.Name, rel.Seq)
-	err := d.builder.Build(ctx, BuildSpec{
+	err = d.builder.Build(ctx, BuildSpec{
 		Dir: dir, Dockerfile: cfg.Build.Dockerfile, Target: cfg.Build.Target,
 		Image: rel.Image, CacheKey: p.Name,
 	}, w)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
-	}
-
-	env, err := d.resolveEnv(ctx, p, cfg, w)
-	if err != nil {
-		return err
 	}
 	if err := d.store.SetBuilt(ctx, rel.ID, rel.Image, env); err != nil {
 		return err
@@ -335,6 +336,7 @@ func (d *Deployer) runRelease(ctx context.Context, project string, rel store.Rel
 		Env:      rel.Env[config.ReleaseTarget],
 		Labels:   labels(project, rel.Seq, RoleRelease, ""),
 		Networks: []Network{{Name: ProjectNetwork(project)}},
+		Init:     true,
 	}
 	if err := d.rt.Run(ctx, spec); err != nil {
 		return err
@@ -366,6 +368,7 @@ func (d *Deployer) serviceSpecs(project string, rel store.Release, cfg *config.C
 			Networks: []Network{{Name: ProjectNetwork(project), Aliases: []string{name}}},
 			ReadOnly: s.ReadOnly,
 			Restart:  true,
+			Init:     true,
 		}
 		if s.Command != "" {
 			spec.Cmd, _ = shellquote.Split(s.Command) // config.Parse rejects commands that do not split
@@ -452,7 +455,7 @@ func (d *Deployer) resolveEnv(ctx context.Context, p store.Project, cfg *config.
 	if err != nil {
 		var me *config.MissingError
 		if errors.As(err, &me) {
-			return nil, fmt.Errorf("%w; set them with `kayly env set %s KEY=value`", err, p.Name)
+			return nil, fmt.Errorf("%w; set them with `kayly env set KEY=value -p %s`", err, p.Name)
 		}
 		return nil, err
 	}

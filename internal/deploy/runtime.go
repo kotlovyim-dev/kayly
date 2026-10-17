@@ -60,7 +60,8 @@ type Proxy interface {
 type Spec struct {
 	Name  string
 	Image string
-	// Cmd overrides the image's command. Nil keeps the image default.
+	// Cmd is the full command line: it replaces the image's entrypoint and command and runs
+	// without a shell. Nil keeps the image's own.
 	Cmd      []string
 	Env      map[string]string
 	Labels   map[string]string
@@ -69,8 +70,22 @@ type Spec struct {
 	ReadOnly bool
 	// Restart keeps the container running (restart unless-stopped). Off for one-off runs.
 	Restart bool
+	// Init runs a minimal init as PID 1 that forwards signals and reaps zombies. Without it
+	// a process such as node, which does not handle SIGTERM as PID 1, is only stopped by
+	// SIGKILL at the end of the grace period.
+	Init bool
 	// CapAdd adds capabilities back after all are dropped.
 	CapAdd []string
+	// Ports are published on the host. Only infrastructure (the proxy) publishes ports;
+	// services are reached through the proxy.
+	Ports []Port
+}
+
+// Port publishes a container port on all host interfaces.
+type Port struct {
+	Host, Container int
+	// Proto is "tcp" or "udp".
+	Proto string
 }
 
 // Network attaches a container to a network under extra DNS names.
@@ -79,10 +94,13 @@ type Network struct {
 	Aliases []string
 }
 
-// Mount is a named volume mounted at Path.
+// Mount mounts a named volume, or a host directory (Bind), at Path.
 type Mount struct {
 	Volume string
+	Bind   string
 	Path   string
+	// ReadOnly applies to bind mounts.
+	ReadOnly bool
 }
 
 // Container is the observed state of a container.

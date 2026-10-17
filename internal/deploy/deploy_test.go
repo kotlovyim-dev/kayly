@@ -391,8 +391,12 @@ func TestCrashRecovery(t *testing.T) {
 			h.px.hook = nil
 			h.px.mu.Unlock()
 
-			if err := h.newDeployer().Recover(context.Background()); err != nil {
+			restarted := h.newDeployer()
+			if err := restarted.Recover(context.Background()); err != nil {
 				t.Fatalf("recover: %v", err)
+			}
+			if err := restarted.Reconcile(context.Background()); err != nil {
+				t.Fatalf("reconcile: %v", err)
 			}
 			h.assertLive(tt.wantLive)
 
@@ -445,6 +449,9 @@ func TestReconcileSkipsBusyProject(t *testing.T) {
 	if slices.Contains(h.rt.names(), "app_worker_r1") {
 		t.Error("reconcile touched a project locked by a deploy")
 	}
+	if h.rt.wasRemoved("app_web_r1") {
+		t.Error("reconcile removed a live container of a project locked by a deploy")
+	}
 	l.Unlock()
 }
 
@@ -455,5 +462,18 @@ func failOn(method, arg string) func(string, string) error {
 			return errors.New(m + " failed")
 		}
 		return nil
+	}
+}
+
+func TestMissingEnvFailsBeforeBuild(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(app + "NEW_KEY = {}\n")
+	built := false
+	h.rt.hook = func(method, _ string) error {
+		built = built || method == "Build"
+		return nil
+	}
+	if _, _, err := h.deploy(); err == nil || built {
+		t.Fatalf("err = %v, built = %v: a missing value must fail before the build", err, built)
 	}
 }

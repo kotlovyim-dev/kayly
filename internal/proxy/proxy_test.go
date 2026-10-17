@@ -19,8 +19,9 @@ var opts = Options{AdminListen: "unix//run/kayly/caddy.sock", Email: "ops@exampl
 
 func TestConfigGolden(t *testing.T) {
 	routes := []Route{
-		{Host: "ten00.example.com", Upstream: "ten00-web-r4:3000"},
-		{Host: "leryo.example.com", Upstream: "leryo-app-r12:3000"},
+		{Host: "ten00.example.com", Upstream: "ten00_web_r4:3000"},
+		{Host: "leryo.example.com", Upstream: "leryo_app_r12:3000"},
+		{Host: "kayly.example.com", Upstream: "unix//run/kayly/proxy/kayly.sock"},
 	}
 	got, err := Config(routes, opts)
 	if err != nil {
@@ -41,7 +42,7 @@ func TestConfigGolden(t *testing.T) {
 	}
 
 	// Route order must not change the output, or every reconcile would reload Caddy.
-	routes[0], routes[1] = routes[1], routes[0]
+	routes[0], routes[2] = routes[2], routes[0]
 	again, _ := Config(routes, opts)
 	if !bytes.Equal(got, again) {
 		t.Error("config depends on route order")

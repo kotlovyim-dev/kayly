@@ -13,10 +13,12 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 )
 
-// Route sends HTTPS traffic for Host to Upstream, a "host:port" on the edge network.
+// Route sends HTTPS traffic for Host to Upstream: a "host:port" on the edge network, or
+// "unix//path/to.sock" for the daemon itself.
 type Route struct {
 	Host     string
 	Upstream string
@@ -46,7 +48,7 @@ func Config(routes []Route, opt Options) ([]byte, error) {
 		if r.Host == "" || r.Upstream == "" {
 			return nil, fmt.Errorf("proxy: route %+v: host and upstream are required", r)
 		}
-		if _, _, err := net.SplitHostPort(r.Upstream); err != nil {
+		if _, _, err := net.SplitHostPort(r.Upstream); err != nil && !strings.HasPrefix(r.Upstream, "unix//") {
 			return nil, fmt.Errorf("proxy: route %s: upstream: %w", r.Host, err)
 		}
 		if i > 0 && routes[i-1].Host == r.Host {

@@ -412,6 +412,10 @@ func (s *Server) deleteToken(w http.ResponseWriter, r *http.Request) {
 // project loads the {project} path value, answering 404 if it does not exist.
 func (s *Server) project(w http.ResponseWriter, r *http.Request) (store.Project, bool) {
 	p, err := s.store.Project(r.Context(), r.PathValue("project"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", err.Error(), "a project is created by its first `kayly deploy`")
+		return store.Project{}, false
+	}
 	if err != nil {
 		s.fail(w, r, err)
 		return store.Project{}, false

@@ -126,6 +126,7 @@ Rules:
 - `generate` values are created once, on first deploy, and shown in the UI; they never change unless the user regenerates them.
 - `template` resolves `${KEY}`, `${postgres.<host|port|user|password|db|url>}` and `${<service>.url}` at release time. `${postgres.url}` is the superuser URL; scope it.
 - Only declared keys are delivered. A stored value whose key is no longer in `[env]` is ignored and reported, so deleting a line from the file can never leak a secret to every service.
+- A `command` replaces the image's entrypoint and command, and runs without a shell (words are split like a shell would split them). Use `sh -c '…'` for pipes, `&&` or `$VAR` expansion. Without `command` the image runs as built.
 - Unknown keys are an error, not a warning. The parser reports file, line and the nearest valid key.
 - Defaults for every service: restart `unless-stopped`, `no-new-privileges`, all capabilities dropped, log rotation 5 × 10 MB, stop grace 30 s. `read_only = true` adds a read-only root filesystem with a tmpfs on `/tmp`. Opt-outs are added when an app needs one.
 

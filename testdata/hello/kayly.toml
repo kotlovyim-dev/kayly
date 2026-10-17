@@ -1,0 +1,16 @@
+[release]
+command = "sh -c 'echo migrating with $ADMIN_TOKEN && touch /tmp/ok'"
+
+[services.web]
+command = "node server.js"
+port = 3000
+health = "/health"
+
+[services.worker]
+command = "node server.js worker"
+
+[env]
+GREETING     = {}
+SECRET       = { generate = "hex:16" }
+ADMIN_TOKEN  = { generate = "hex:8", to = ["release"] }
+ORIGIN       = { template = "${web.url}" }

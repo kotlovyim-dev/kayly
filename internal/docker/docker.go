@@ -3,6 +3,9 @@ package docker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -85,6 +88,7 @@ func (r *Runtime) Run(ctx context.Context, s deploy.Spec) error {
 		CapAdd:         s.CapAdd,
 		SecurityOpt:    []string{"no-new-privileges:true"},
 		ReadonlyRootfs: s.ReadOnly,
+		Init:           &s.Init,
 		LogConfig: container.LogConfig{
 			Type:   "json-file",
 			Config: map[string]string{"max-size": "10m", "max-file": "5"},
@@ -94,7 +98,23 @@ func (r *Runtime) Run(ctx context.Context, s deploy.Spec) error {
 		host.Tmpfs = map[string]string{"/tmp": ""}
 	}
 	for _, m := range s.Mounts {
-		host.Mounts = append(host.Mounts, mount.Mount{Type: mount.TypeVolume, Source: m.Volume, Target: m.Path})
+		if m.Bind != "" {
+			host.Mounts = append(host.Mounts, mount.Mount{Type: mount.TypeBind, Source: m.Bind, Target: m.Path, ReadOnly: m.ReadOnly})
+		} else {
+			host.Mounts = append(host.Mounts, mount.Mount{Type: mount.TypeVolume, Source: m.Volume, Target: m.Path})
+		}
+	}
+	var exposed network.PortSet
+	if len(s.Ports) > 0 {
+		exposed, host.PortBindings = network.PortSet{}, network.PortMap{}
+	}
+	for _, p := range s.Ports {
+		port, err := network.ParsePort(fmt.Sprintf("%d/%s", p.Container, p.Proto))
+		if err != nil {
+			return fmt.Errorf("docker: %s: %w", s.Name, err)
+		}
+		exposed[port] = struct{}{}
+		host.PortBindings[port] = append(host.PortBindings[port], network.PortBinding{HostPort: strconv.Itoa(p.Host)})
 	}
 	netcfg := &network.NetworkingConfig{EndpointsConfig: map[string]*network.EndpointSettings{}}
 	for _, n := range s.Networks {
@@ -104,13 +124,22 @@ func (r *Runtime) Run(ctx context.Context, s deploy.Spec) error {
 		host.NetworkMode = container.NetworkMode(s.Networks[0].Name)
 	}
 
+	var entrypoint []string
+	if s.Cmd != nil {
+		// [""] tells the engine to drop the image's entrypoint (as `docker run --entrypoint ""`).
+		// Without it, an image with ENTRYPOINT ["bash", "-c"], as Railpack builds, would run
+		// only the first word of the command.
+		entrypoint = []string{""}
+	}
 	res, err := r.c.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: s.Name,
 		Config: &container.Config{
-			Image:  s.Image,
-			Cmd:    s.Cmd,
-			Env:    env,
-			Labels: s.Labels,
+			Image:        s.Image,
+			Entrypoint:   entrypoint,
+			Cmd:          s.Cmd,
+			Env:          env,
+			Labels:       s.Labels,
+			ExposedPorts: exposed,
 		},
 		HostConfig:       host,
 		NetworkingConfig: netcfg,
@@ -240,6 +269,56 @@ func (r *Runtime) RemoveImage(ctx context.Context, ref string) error {
 	_, err := r.c.ImageRemove(ctx, ref, client.ImageRemoveOptions{})
 	if err != nil && !cerrdefs.IsNotFound(err) {
 		return fmt.Errorf("docker: remove image %s: %w", ref, err)
+	}
+	return nil
+}
+
+// LabelSpec holds a hash of the spec a long-lived container was created from.
+const LabelSpec = "dev.kayly.spec"
+
+// EnsureContainer keeps a long-lived infrastructure container (the proxy, add-ons) running
+// as spec describes. A container that runs the same spec is left alone; one that is
+// stopped or built from a different spec is replaced. The image is pulled if missing.
+func (r *Runtime) EnsureContainer(ctx context.Context, spec deploy.Spec) error {
+	b, err := json.Marshal(spec)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(b)
+	hash := hex.EncodeToString(sum[:8])
+	c, err := r.Inspect(ctx, spec.Name)
+	switch {
+	case err == nil && c.Labels[LabelSpec] == hash && (c.Running || c.Restarting):
+		return nil
+	case err != nil && !errors.Is(err, deploy.ErrNoContainer):
+		return err
+	}
+	if ok, err := r.ImageExists(ctx, spec.Image); err != nil {
+		return err
+	} else if !ok {
+		if err := r.pull(ctx, spec.Image); err != nil {
+			return err
+		}
+	}
+	if err := r.Remove(ctx, spec.Name, 30*time.Second); err != nil {
+		return err
+	}
+	spec.Labels = maps.Clone(spec.Labels)
+	if spec.Labels == nil {
+		spec.Labels = map[string]string{}
+	}
+	spec.Labels[LabelSpec] = hash
+	return r.Run(ctx, spec)
+}
+
+func (r *Runtime) pull(ctx context.Context, ref string) error {
+	res, err := r.c.ImagePull(ctx, ref, client.ImagePullOptions{})
+	if err != nil {
+		return fmt.Errorf("docker: pull %s: %w", ref, err)
+	}
+	defer res.Close()
+	if err := res.Wait(ctx); err != nil {
+		return fmt.Errorf("docker: pull %s: %w", ref, err)
 	}
 	return nil
 }

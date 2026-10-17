@@ -53,8 +53,11 @@ func (d *Deployer) waitService(ctx context.Context, container, name string, svc 
 			return fmt.Errorf("%s: %w", name, err)
 		}
 		if !c.Running || c.RestartCount > 0 {
-			fmt.Fprintf(w, "%s crashed (exit code %d), last lines:\n", name, c.ExitCode)
+			fmt.Fprintf(w, "%s stopped (exit code %d), last lines:\n", name, c.ExitCode)
 			d.rt.Logs(context.WithoutCancel(ctx), container, false, 30, w)
+			if c.ExitCode == 0 {
+				return fmt.Errorf("%s exited right after starting: a service must keep running; check its command", name)
+			}
 			return fmt.Errorf("%s crashed on start (exit code %d)", name, c.ExitCode)
 		}
 		switch {
