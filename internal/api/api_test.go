@@ -304,3 +304,37 @@ func TestRestoreNeedsTheProjectNameAsConfirmation(t *testing.T) {
 		}
 	}
 }
+
+func TestCommitFromTheClientIsSanitized(t *testing.T) {
+	get := func(sha, msg string) store.Commit {
+		r := httptest.NewRequest("POST", "/", nil)
+		r.Header.Set("X-Kayly-Commit", sha)
+		r.Header.Set("X-Kayly-Commit-Message", msg)
+		return commitFrom(r)
+	}
+	if c := get("3a77de6", "feat%3A%20%D0%BF%D1%80%D0%B8%D0%B2%D1%96%D1%82"); c != (store.Commit{SHA: "3a77de6", Message: "feat: привіт"}) {
+		t.Errorf("plain = %+v", c)
+	}
+	if c := get("3a77de6-dirty", "one%0Atwo"); c.SHA != "3a77de6-dirty" || c.Message != "one" {
+		t.Errorf("multi-line = %+v", c)
+	}
+	if c := get("3a77de6", strings.Repeat("x", 500)); len([]rune(c.Message)) != 200 {
+		t.Errorf("long message = %d runes", len([]rune(c.Message)))
+	}
+	for _, bad := range []string{"", "xyz", "3a77de6; rm -rf", "<script>", "ABCDEF1"} {
+		if c := get(bad, "msg"); c != (store.Commit{}) {
+			t.Errorf("sha %q accepted: %+v", bad, c)
+		}
+	}
+}
+
+func TestReleaseLogRoute(t *testing.T) {
+	e := newEnv(t)
+	e.do(e.trusted, "POST", "/api/v1/projects", `{"name":"app"}`, "")
+	if code, _ := e.do(e.trusted, "GET", "/api/v1/projects/app/releases/abc/log", "", ""); code != 400 {
+		t.Errorf("non-numeric release: %d", code)
+	}
+	if code, _ := e.do(e.trusted, "GET", "/api/v1/projects/app/releases/r1/log", "", ""); code != 404 {
+		t.Errorf("missing release: %d", code)
+	}
+}

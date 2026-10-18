@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -78,5 +79,34 @@ func TestSourceFilesWithGit(t *testing.T) {
 	slices.Sort(got)
 	if want := []string{".gitignore", "tracked.txt", "untracked.go"}; !slices.Equal(got, want) {
 		t.Errorf("files = %v, want %v", got, want)
+	}
+}
+
+func TestCommitHeaders(t *testing.T) {
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("git unavailable: %v %s", err, out)
+		}
+	}
+	if h := commitHeaders(dir); h != nil {
+		t.Fatalf("outside a repository: %v", h)
+	}
+	git("init", "-q")
+	if h := commitHeaders(dir); h != nil {
+		t.Fatalf("a repository without commits: %v", h)
+	}
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
+	git("add", ".")
+	git("commit", "-q", "-m", "feat: first commit")
+	h := commitHeaders(dir)
+	if len(h) != 4 || len(h[1]) != 40 || h[3] != "feat:%20first%20commit" {
+		t.Fatalf("clean tree: %v", h)
+	}
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("changed"), 0o644)
+	if h := commitHeaders(dir); !strings.HasSuffix(h[1], "-dirty") {
+		t.Fatalf("modified tree: %v", h)
 	}
 }

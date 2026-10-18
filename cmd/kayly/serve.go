@@ -43,6 +43,7 @@ func (p paths) db() string          { return filepath.Join(p.data, "kayly.db") }
 func (p paths) key() string         { return filepath.Join(p.data, "master.key") }
 func (p paths) builds() string      { return filepath.Join(p.data, "builds") }
 func (p paths) backups() string     { return filepath.Join(p.data, "backups") }
+func (p paths) logs() string        { return filepath.Join(p.data, "logs") }
 func (p paths) caddyConfig() string { return filepath.Join(p.data, "caddy.json") }
 func (p paths) proxyDir() string    { return filepath.Join(p.run, "proxy") }
 func (p paths) caddySock() string   { return filepath.Join(p.proxyDir(), "caddy.sock") }
@@ -129,6 +130,7 @@ func serve(args []string) error {
 			Proxy:       proxy.Options{AdminListen: adminListen, Email: *email},
 			ExtraRoutes: []proxy.Route{{Host: *domain, Upstream: "unix/" + p.publicSock()}},
 			BackupDir:   p.backups(),
+			LogDir:      p.logs(),
 			Notify:      notifier.Notify,
 			KeyFile:     p.key(),
 			Offsite:     uploader,

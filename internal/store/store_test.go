@@ -45,7 +45,7 @@ func TestReleaseLifecycle(t *testing.T) {
 	s, _ := open(t)
 	p, _ := s.CreateProject(ctx, "leryo")
 
-	r1, err := s.CreateRelease(ctx, p.ID, []byte("[services.app]"))
+	r1, err := s.CreateRelease(ctx, p.ID, []byte("[services.app]"), Commit{})
 	if err != nil || r1.Seq != 1 || r1.Status != StatusBuilding {
 		t.Fatalf("r1 = %+v, %v", r1, err)
 	}
@@ -54,7 +54,7 @@ func TestReleaseLifecycle(t *testing.T) {
 	must(t, s.SetStarting(ctx, r1.ID))
 	must(t, s.Activate(ctx, p.ID, r1.ID))
 
-	r2, _ := s.CreateRelease(ctx, p.ID, []byte("[services.app]"))
+	r2, _ := s.CreateRelease(ctx, p.ID, []byte("[services.app]"), Commit{})
 	if r2.Seq != 2 {
 		t.Fatalf("r2.Seq = %d", r2.Seq)
 	}
@@ -81,7 +81,7 @@ func TestReleaseLifecycle(t *testing.T) {
 	}
 
 	// A failed release can never be activated or failed again.
-	r3, _ := s.CreateRelease(ctx, p.ID, []byte("x"))
+	r3, _ := s.CreateRelease(ctx, p.ID, []byte("x"), Commit{})
 	must(t, s.Fail(ctx, r3.ID, "build failed"))
 	if err := s.Activate(ctx, p.ID, r3.ID); err == nil {
 		t.Error("activated a failed release")
@@ -95,11 +95,11 @@ func TestFailInterrupted(t *testing.T) {
 	ctx := context.Background()
 	s, _ := open(t)
 	p, _ := s.CreateProject(ctx, "ten00")
-	live, _ := s.CreateRelease(ctx, p.ID, []byte("x"))
+	live, _ := s.CreateRelease(ctx, p.ID, []byte("x"), Commit{})
 	must(t, s.SetBuilt(ctx, live.ID, "img", nil))
 	must(t, s.SetStarting(ctx, live.ID))
 	must(t, s.Activate(ctx, p.ID, live.ID))
-	stuck, _ := s.CreateRelease(ctx, p.ID, []byte("x"))
+	stuck, _ := s.CreateRelease(ctx, p.ID, []byte("x"), Commit{})
 
 	got, err := s.FailInterrupted(ctx)
 	if err != nil || len(got) != 1 || got[0].ID != stuck.ID {
@@ -235,5 +235,23 @@ func TestSettings(t *testing.T) {
 	}
 	if v, _ := s.Setting(ctx, "k"); v != "" {
 		t.Fatalf("not removed: %q", v)
+	}
+}
+
+func TestReleaseKeepsItsCommit(t *testing.T) {
+	ctx := context.Background()
+	s, _ := open(t)
+	p, _ := s.CreateProject(ctx, "app")
+	want := Commit{SHA: "3a77de6-dirty", Message: "feat: Ünïcode subject"}
+	r, err := s.CreateRelease(ctx, p.ID, []byte("x"), want)
+	if err != nil || r.Commit != want {
+		t.Fatalf("created = %+v, %v", r.Commit, err)
+	}
+	got, _ := s.Release(ctx, p.ID, r.Seq)
+	if got.Commit != want {
+		t.Fatalf("read back %+v", got.Commit)
+	}
+	if plain, _ := s.CreateRelease(ctx, p.ID, []byte("x"), Commit{}); plain.Commit != (Commit{}) {
+		t.Fatalf("a release without a commit has %+v", plain.Commit)
 	}
 }

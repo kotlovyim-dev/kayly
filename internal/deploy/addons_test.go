@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,9 +133,11 @@ func TestRedeployAppliesEnvWithoutBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	built := false
+	var built atomic.Bool // the hook runs on every container goroutine
 	h.rt.hook = func(method, _ string) error {
-		built = built || method == "Build"
+		if method == "Build" {
+			built.Store(true)
+		}
 		return nil
 	}
 	var log bytes.Buffer
@@ -142,8 +145,8 @@ func TestRedeployAppliesEnvWithoutBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, log.String())
 	}
-	if built || rel.Seq != 2 {
-		t.Errorf("built = %v, seq = %d", built, rel.Seq)
+	if built.Load() || rel.Seq != 2 {
+		t.Errorf("built = %v, seq = %d", built.Load(), rel.Seq)
 	}
 	h.assertLive(2)
 	web := h.rt.env("app_web_r2")

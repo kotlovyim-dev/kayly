@@ -114,6 +114,9 @@ CREATE TABLE setting (
 	key   TEXT PRIMARY KEY,
 	value BLOB NOT NULL
 );
+`, `
+ALTER TABLE release ADD COLUMN commit_sha TEXT NOT NULL DEFAULT '';
+ALTER TABLE release ADD COLUMN commit_msg TEXT NOT NULL DEFAULT '';
 `}
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -221,15 +224,24 @@ type Release struct {
 	Env       map[string]map[string]string
 	Error     string
 	CreatedAt time.Time
+	// Commit is the source the release was built from; empty when the source had none.
+	Commit Commit
 }
 
-const releaseCols = "id, project_id, seq, status, config, image, env, error, created_at"
+// Commit identifies the source of a release. SHA ends in "-dirty" when the work tree it was
+// built from had uncommitted changes.
+type Commit struct {
+	SHA     string
+	Message string
+}
+
+const releaseCols = "id, project_id, seq, status, config, image, env, error, created_at, commit_sha, commit_msg"
 
 func (s *Store) scanRelease(row interface{ Scan(...any) error }) (Release, error) {
 	var r Release
 	var env []byte
 	var created int64
-	if err := row.Scan(&r.ID, &r.ProjectID, &r.Seq, &r.Status, &r.Config, &r.Image, &env, &r.Error, &created); err != nil {
+	if err := row.Scan(&r.ID, &r.ProjectID, &r.Seq, &r.Status, &r.Config, &r.Image, &env, &r.Error, &created, &r.Commit.SHA, &r.Commit.Message); err != nil {
 		return Release{}, err
 	}
 	r.CreatedAt = time.Unix(created, 0)
@@ -246,11 +258,11 @@ func (s *Store) scanRelease(row interface{ Scan(...any) error }) (Release, error
 }
 
 // CreateRelease records a new release in status building with the next sequence number.
-func (s *Store) CreateRelease(ctx context.Context, projectID int64, config []byte) (Release, error) {
+func (s *Store) CreateRelease(ctx context.Context, projectID int64, config []byte, commit Commit) (Release, error) {
 	row := s.db.QueryRowContext(ctx, `
-		INSERT INTO release (project_id, seq, status, config, created_at)
-		VALUES (?, (SELECT coalesce(max(seq), 0) + 1 FROM release WHERE project_id = ?), ?, ?, ?)
-		RETURNING `+releaseCols, projectID, projectID, StatusBuilding, config, time.Now().Unix())
+		INSERT INTO release (project_id, seq, status, config, created_at, commit_sha, commit_msg)
+		VALUES (?, (SELECT coalesce(max(seq), 0) + 1 FROM release WHERE project_id = ?), ?, ?, ?, ?, ?)
+		RETURNING `+releaseCols, projectID, projectID, StatusBuilding, config, time.Now().Unix(), commit.SHA, commit.Message)
 	r, err := s.scanRelease(row)
 	if err != nil {
 		return Release{}, fmt.Errorf("store: create release: %w", err)

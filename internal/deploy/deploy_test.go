@@ -49,6 +49,7 @@ type harness struct {
 	// backups is the Deployer's BackupDir.
 	backups string
 	keyFile string
+	logs    string
 	// alerts are the notifications the Deployer sent.
 	alerts []string
 }
@@ -71,6 +72,7 @@ func newHarness(t *testing.T) *harness {
 
 	h := &harness{t: t, st: st, rt: newFakeRuntime(), px: &fakeProxy{}, dir: t.TempDir(), backups: t.TempDir()}
 	h.writeConfig(app)
+	h.logs = t.TempDir()
 	h.keyFile = filepath.Join(t.TempDir(), "master.key")
 	must(t, os.WriteFile(h.keyFile, []byte("the-master-key"), 0o600))
 	h.d = h.newDeployer()
@@ -87,6 +89,7 @@ func (h *harness) newDeployer() *Deployer {
 		KeepImages:    2,
 		BackupDir:     h.backups,
 		KeyFile:       h.keyFile,
+		LogDir:        h.logs,
 		Notify:        func(_ context.Context, text string) { h.alerts = append(h.alerts, text) },
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	d.checkHealth = h.rt.health
@@ -101,7 +104,7 @@ func (h *harness) writeConfig(toml string) {
 
 func (h *harness) deploy() (store.Release, string, error) {
 	var log bytes.Buffer
-	rel, err := h.d.Deploy(context.Background(), "app", h.dir, &log)
+	rel, err := h.d.Deploy(context.Background(), "app", h.dir, store.Commit{}, &log)
 	return rel, log.String(), err
 }
 
@@ -536,5 +539,57 @@ func TestLimitsAreAppliedToServiceContainers(t *testing.T) {
 	}
 	if web.MemoryBytes != 0 || web.CPUs != 0 {
 		t.Errorf("a service without limits got %d bytes, %v cpus", web.MemoryBytes, web.CPUs)
+	}
+}
+
+func TestEveryReleaseKeepsItsLogAndCommit(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	commit := store.Commit{SHA: "3a77de6", Message: "feat: first"}
+	var out bytes.Buffer
+	rel, err := h.d.Deploy(ctx, "app", h.dir, commit, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func(seq int) string {
+		t.Helper()
+		path, err := h.d.ReleaseLogPath(ctx, "app", seq)
+		if err != nil {
+			t.Fatalf("r%d: %v", seq, err)
+		}
+		b, _ := os.ReadFile(path)
+		return string(b)
+	}
+	if got := read(1); got != out.String() || !strings.Contains(got, "r1 is live") {
+		t.Fatalf("log of r1 differs from what the client saw:\n%q\n%q", got, out.String())
+	}
+	if rel.Commit != commit {
+		t.Errorf("release commit = %+v", rel.Commit)
+	}
+
+	// A failed deploy keeps its log too: that is the one people need.
+	h.rt.hook = failOn("Build", "kayly/app:r2")
+	if _, _, err := h.deploy(); err == nil {
+		t.Fatal("deploy succeeded")
+	}
+	h.rt.hook = nil
+	if got := read(2); !strings.Contains(got, "r2 failed") {
+		t.Errorf("log of the failed r2 = %q", got)
+	}
+
+	// A redeploy is a new release of the same source.
+	if _, err := h.d.Redeploy(ctx, "app", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(3); !strings.Contains(got, "r3 is live") {
+		t.Errorf("log of r3 = %q", got)
+	}
+	p, _ := h.st.Project(ctx, "app")
+	if r3, _ := h.st.Release(ctx, p.ID, 3); r3.Commit != commit {
+		t.Errorf("redeploy lost the commit: %+v", r3.Commit)
+	}
+
+	if _, err := h.d.ReleaseLogPath(ctx, "app", 99); err == nil {
+		t.Error("log of a release that does not exist")
 	}
 }

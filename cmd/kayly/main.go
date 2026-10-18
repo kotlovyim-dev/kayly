@@ -38,6 +38,7 @@ Anywhere:
   kayly deploy [dir] [-p project]           build and release dir (default .)
   kayly projects                            list projects
   kayly releases [-p project]               list releases
+  kayly releases log <release> [-p project] the output of that deploy
   kayly rollback <release> [-p project]     make an earlier release live again
   kayly logs <service> [-p project] [-f] [-n lines]
   kayly redeploy [-p project]               release the live image again with current env and add-ons
@@ -162,14 +163,17 @@ func runClientCommand(cmd string, args []string) error {
 		if err != nil {
 			return err
 		}
+		if len(pos) == 2 && pos[0] == "log" {
+			return c.releaseLog(ctx, name, pos[1])
+		}
 		var rs []api.ReleaseView
 		if err := c.do(ctx, "GET", "/api/v1/projects/"+name+"/releases", nil, &rs); err != nil {
 			return err
 		}
 		tw := table()
-		fmt.Fprintln(tw, "RELEASE\tSTATUS\tCREATED\tERROR")
+		fmt.Fprintln(tw, "RELEASE\tSTATUS\tCREATED\tCOMMIT\tERROR")
 		for _, r := range rs {
-			fmt.Fprintf(tw, "r%d\t%s\t%s\t%s\n", r.Seq, r.Status, r.CreatedAt, firstLine(r.Error))
+			fmt.Fprintf(tw, "r%d\t%s\t%s\t%s\t%s\n", r.Seq, r.Status, r.CreatedAt, shortCommit(r), firstLine(r.Error))
 		}
 		return tw.Flush()
 	case "rollback":
@@ -363,6 +367,33 @@ func (c *client) backups(ctx context.Context, proj func(string) (string, error),
 		return f.Close()
 	}
 	return errors.New("usage: kayly backups ls | create | get <name> | restore <name|latest> | setup | status | sync | drill")
+}
+
+func (c *client) releaseLog(ctx context.Context, project, release string) error {
+	resp, err := c.request(ctx, "GET", "/api/v1/projects/"+project+"/releases/"+url.PathEscape(release)+"/log", "", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, err = io.Copy(os.Stdout, resp.Body)
+	return err
+}
+
+// shortCommit is "3a77de6 feat: …" for the releases table.
+func shortCommit(r api.ReleaseView) string {
+	if r.Commit == "" {
+		return "-"
+	}
+	sha, dirty := strings.CutSuffix(r.Commit, "-dirty")
+	sha = sha[:min(len(sha), 7)]
+	if dirty {
+		sha += "*"
+	}
+	msg := []rune(r.CommitMessage)
+	if len(msg) > 40 {
+		msg = append(msg[:39], '…')
+	}
+	return strings.TrimSpace(sha + " " + string(msg))
 }
 
 func (c *client) listBackups(ctx context.Context, base string, remote bool) ([]deploy.Backup, error) {
@@ -590,12 +621,12 @@ func (c *client) deploy(ctx context.Context, name, dir string) error {
 	fmt.Printf("uploading %d files\n", len(files))
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(pack(dir, files, pw)) }()
-	return c.stream(ctx, "/api/v1/projects/"+name+"/deploys", "application/gzip", pr)
+	return c.stream(ctx, "/api/v1/projects/"+name+"/deploys", "application/gzip", pr, commitHeaders(dir)...)
 }
 
 // stream posts body and prints an NDJSON operation stream; a failed result is an error.
-func (c *client) stream(ctx context.Context, path, contentType string, body io.Reader) error {
-	resp, err := c.request(ctx, "POST", path, contentType, body)
+func (c *client) stream(ctx context.Context, path, contentType string, body io.Reader, headers ...string) error {
+	resp, err := c.request(ctx, "POST", path, contentType, body, headers...)
 	if err != nil {
 		return err
 	}
@@ -708,10 +739,13 @@ type apiError struct {
 
 func (e *apiError) Error() string { return e.msg }
 
-func (c *client) request(ctx context.Context, method, path, contentType string, body io.Reader) (*http.Response, error) {
+func (c *client) request(ctx context.Context, method, path, contentType string, body io.Reader, headers ...string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
 	if err != nil {
 		return nil, err
+	}
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)

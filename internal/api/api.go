@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"regexp"
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/kotlovyim-dev/kayly/internal/config"
 	"github.com/kotlovyim-dev/kayly/internal/deploy"
@@ -58,6 +60,7 @@ func (s *Server) Handler(trusted bool) http.Handler {
 	mux.HandleFunc("POST /api/v1/projects", s.createProject)
 	mux.HandleFunc("GET /api/v1/projects/{project}", s.getProject)
 	mux.HandleFunc("GET /api/v1/projects/{project}/releases", s.listReleases)
+	mux.HandleFunc("GET /api/v1/projects/{project}/releases/{seq}/log", s.releaseLog)
 	mux.HandleFunc("POST /api/v1/projects/{project}/redeploy", s.redeploy)
 	mux.HandleFunc("GET /api/v1/projects/{project}/addons", s.listAddons)
 	mux.HandleFunc("POST /api/v1/projects/{project}/addons", s.addAddon)
@@ -426,7 +429,10 @@ func (s *Server) downloadBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 func releaseView(rel store.Release) ReleaseView {
-	return ReleaseView{Seq: rel.Seq, Status: rel.Status, Error: rel.Error, CreatedAt: rel.CreatedAt.UTC().Format(time.RFC3339)}
+	return ReleaseView{
+		Seq: rel.Seq, Status: rel.Status, Error: rel.Error, CreatedAt: rel.CreatedAt.UTC().Format(time.RFC3339),
+		Commit: rel.Commit.SHA, CommitMessage: rel.Commit.Message,
+	}
 }
 
 // ReleaseView is a release as the API shows it.
@@ -435,6 +441,9 @@ type ReleaseView struct {
 	Status    string `json:"status"`
 	Error     string `json:"error,omitempty"`
 	CreatedAt string `json:"created_at"`
+	// Commit and CommitMessage identify the source when the client knew it.
+	Commit        string `json:"commit,omitempty"`
+	CommitMessage string `json:"commit_message,omitempty"`
 	// CanRollBack is true for a previous release whose image is still kept.
 	CanRollBack bool `json:"can_roll_back,omitempty"`
 }
@@ -483,8 +492,54 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) {
 	}
 	stream := newStream(w)
 	// A client that disconnects must not abort a deploy halfway: it runs to the end.
-	rel, err := s.deployer.Deploy(context.WithoutCancel(r.Context()), p.Name, dir, stream)
+	rel, err := s.deployer.Deploy(context.WithoutCancel(r.Context()), p.Name, dir, commitFrom(r), stream)
 	stream.end(Result{OK: err == nil, Release: rel.Seq, Error: errString(err)})
+}
+
+// commitFrom reads the commit the CLI sends with a source upload. The client is trusted only
+// as far as display goes: anything that does not look like a hash is dropped, and the
+// message is a single, short line.
+func commitFrom(r *http.Request) store.Commit {
+	var c store.Commit
+	if sha := r.Header.Get("X-Kayly-Commit"); commitRe.MatchString(sha) {
+		c.SHA = sha
+		if msg, err := url.PathUnescape(r.Header.Get("X-Kayly-Commit-Message")); err == nil {
+			c.Message = oneLine(msg, 200)
+		}
+	}
+	return c
+}
+
+var commitRe = regexp.MustCompile(`^[0-9a-f]{7,64}(-dirty)?$`)
+
+// oneLine cuts s at its first line break and at max runes.
+func oneLine(s string, max int) string {
+	s, _, _ = strings.Cut(s, "\n")
+	s = strings.TrimSpace(strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s))
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max])
+	}
+	return s
+}
+
+func (s *Server) releaseLog(w http.ResponseWriter, r *http.Request) {
+	seq, err := strconv.Atoi(strings.TrimPrefix(r.PathValue("seq"), "r"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_release", "release must be a number such as 12 or r12", "")
+		return
+	}
+	path, err := s.deployer.ReleaseLogPath(r.Context(), r.PathValue("project"), seq)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	http.ServeFile(w, r, path)
 }
 
 func (s *Server) rollback(w http.ResponseWriter, r *http.Request) {

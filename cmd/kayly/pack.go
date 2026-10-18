@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -161,4 +162,23 @@ func copyFile(w io.Writer, name string) error {
 	defer f.Close()
 	_, err = io.Copy(w, f)
 	return err
+}
+
+// commitHeaders describes the git commit of dir for the server, as request headers. Without
+// git, outside a repository or in one without commits it sends nothing. A work tree with
+// uncommitted changes is marked "-dirty": the release is not exactly that commit.
+func commitHeaders(dir string) []string {
+	git := func(args ...string) (string, bool) {
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+		return strings.TrimSpace(string(out)), err == nil
+	}
+	sha, ok := git("rev-parse", "HEAD")
+	if !ok {
+		return nil
+	}
+	if status, ok := git("status", "--porcelain"); ok && status != "" {
+		sha += "-dirty"
+	}
+	msg, _ := git("log", "-1", "--format=%s")
+	return []string{"X-Kayly-Commit", sha, "X-Kayly-Commit-Message", url.PathEscape(msg)}
 }

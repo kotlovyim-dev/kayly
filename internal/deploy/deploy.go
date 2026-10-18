@@ -44,6 +44,8 @@ type Options struct {
 	KeepImages int
 	// BackupDir holds database dumps, one directory per project. Empty disables backups.
 	BackupDir string
+	// LogDir keeps the output of every deploy, one file per release. Empty keeps none.
+	LogDir string
 	// Offsite reads the owner's bucket for restores and drills. Nil without off-site backups.
 	Offsite Offsite
 	// KeyFile is the master key, which a Kayly backup carries with the database snapshot.
@@ -117,7 +119,7 @@ func (d *Deployer) projectLock(name string) *sync.Mutex {
 
 // Deploy builds the app in dir and, if every step succeeds, makes it the live release of
 // project. On failure the previously live release keeps serving. Progress goes to w.
-func (d *Deployer) Deploy(ctx context.Context, project, dir string, w io.Writer) (store.Release, error) {
+func (d *Deployer) Deploy(ctx context.Context, project, dir string, commit store.Commit, w io.Writer) (store.Release, error) {
 	l := d.projectLock(project)
 	l.Lock()
 	defer l.Unlock()
@@ -135,10 +137,12 @@ func (d *Deployer) Deploy(ctx context.Context, project, dir string, w io.Writer)
 	if err != nil {
 		return store.Release{}, err
 	}
-	rel, err := d.store.CreateRelease(ctx, p.ID, raw)
+	rel, err := d.store.CreateRelease(ctx, p.ID, raw, commit)
 	if err != nil {
 		return store.Release{}, err
 	}
+	w, closeLog := d.keepLog(rel, w)
+	defer closeLog()
 	log := d.log.With("project", p.Name, "release", rel.Seq)
 	log.Info("deploy started")
 
@@ -596,10 +600,12 @@ func (d *Deployer) Redeploy(ctx context.Context, project string, w io.Writer) (s
 	if err != nil {
 		return store.Release{}, err
 	}
-	rel, err := d.store.CreateRelease(ctx, p.ID, live.Config)
+	rel, err := d.store.CreateRelease(ctx, p.ID, live.Config, live.Commit)
 	if err != nil {
 		return store.Release{}, err
 	}
+	w, closeLog := d.keepLog(rel, w)
+	defer closeLog()
 	// Each release owns its tag, so pruning r(n) never removes the image of r(n+1).
 	retag := func(image string) error {
 		step(w, fmt.Sprintf("reuse the image of r%d", live.Seq))
