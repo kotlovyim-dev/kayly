@@ -18,6 +18,8 @@ import (
 	"testing/fstest"
 
 	"github.com/kotlovyim-dev/kayly/internal/deploy"
+	"github.com/kotlovyim-dev/kayly/internal/notify"
+	"github.com/kotlovyim-dev/kayly/internal/offsite"
 	"github.com/kotlovyim-dev/kayly/internal/proxy"
 	"github.com/kotlovyim-dev/kayly/internal/secret"
 	"github.com/kotlovyim-dev/kayly/internal/store"
@@ -123,6 +125,8 @@ func newEnv(t *testing.T) *env {
 	// The handlers under test never reach the runtime or the builder.
 	d := deploy.New(st, nil, nil, px, deploy.Options{Proxy: proxy.Options{AdminListen: "unix//x.sock"}}, log)
 	s := New(st, d, t.TempDir(), log)
+	s.Notifier = notify.New(st, log)
+	s.Offsite = offsite.New(st, t.TempDir(), nil, log)
 	s.UI = fstest.MapFS{
 		"index.html":      {Data: []byte("<!doctype html>ui")},
 		"assets/app-1.js": {Data: []byte("js")},
@@ -251,5 +255,38 @@ func TestSessionAndUI(t *testing.T) {
 	}
 	if code := call("POST", "/api/v1/projects", true); code != 201 {
 		t.Errorf("POST with session and CSRF header: %d", code)
+	}
+}
+
+func TestNotificationsNeverEchoSecrets(t *testing.T) {
+	e := newEnv(t)
+	put := func(body string) (int, string) { return e.do(e.trusted, "PUT", "/api/v1/notifications", body, "") }
+	if code, out := put(`{"telegram_token":"123:secret"}`); code != 400 {
+		t.Fatalf("token without chat: %d %s", code, out)
+	}
+	if code, out := put(`{"telegram_token":"123:secret","telegram_chat":"42","webhook_url":"https://h.example/k3y"}`); code != 204 {
+		t.Fatalf("put: %d %s", code, out)
+	}
+	// A later change keeps the fields it does not name.
+	if code, out := put(`{"webhook_url":""}`); code != 204 {
+		t.Fatalf("clear webhook: %d %s", code, out)
+	}
+	code, out := e.do(e.trusted, "GET", "/api/v1/notifications", "", "")
+	if code != 200 || strings.Contains(out, "secret") || strings.Contains(out, "k3y") ||
+		!strings.Contains(out, `"telegram":true`) || !strings.Contains(out, `"webhook":false`) {
+		t.Fatalf("get: %d %s", code, out)
+	}
+}
+
+func TestOffsiteSetupValidatesAndHidesSecrets(t *testing.T) {
+	e := newEnv(t)
+	if code, out := e.do(e.trusted, "PUT", "/api/v1/offsite", `{"endpoint":"x"}`, ""); code != 400 {
+		t.Fatalf("incomplete setup: %d %s", code, out)
+	}
+	if code, out := e.do(e.trusted, "GET", "/api/v1/offsite", "", ""); code != 200 || !strings.Contains(out, `"configured":false`) {
+		t.Fatalf("status: %d %s", code, out)
+	}
+	if code, _ := e.do(e.trusted, "POST", "/api/v1/offsite/sync", "", ""); code != 204 {
+		t.Fatalf("sync without a bucket should be a no-op, got %d", code)
 	}
 }

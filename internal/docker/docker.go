@@ -102,7 +102,7 @@ func (r *Runtime) Run(ctx context.Context, s deploy.Spec) error {
 		if m.Bind != "" {
 			host.Mounts = append(host.Mounts, mount.Mount{Type: mount.TypeBind, Source: m.Bind, Target: m.Path, ReadOnly: m.ReadOnly})
 		} else {
-			host.Mounts = append(host.Mounts, mount.Mount{Type: mount.TypeVolume, Source: m.Volume, Target: m.Path})
+			host.Mounts = append(host.Mounts, mount.Mount{Type: mount.TypeVolume, Source: m.Volume, Target: m.Path, ReadOnly: m.ReadOnly})
 		}
 	}
 	var exposed network.PortSet
@@ -301,7 +301,7 @@ func (r *Runtime) EnsureContainer(ctx context.Context, spec deploy.Spec) error {
 	if ok, err := r.ImageExists(ctx, spec.Image); err != nil {
 		return err
 	} else if !ok {
-		if err := r.pull(ctx, spec.Image); err != nil {
+		if err := r.PullImage(ctx, spec.Image); err != nil {
 			return err
 		}
 	}
@@ -316,7 +316,8 @@ func (r *Runtime) EnsureContainer(ctx context.Context, spec deploy.Spec) error {
 	return r.Run(ctx, spec)
 }
 
-func (r *Runtime) pull(ctx context.Context, ref string) error {
+// PullImage downloads an image.
+func (r *Runtime) PullImage(ctx context.Context, ref string) error {
 	res, err := r.c.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("docker: pull %s: %w", ref, err)

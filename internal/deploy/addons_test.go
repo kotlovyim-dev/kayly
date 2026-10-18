@@ -1,12 +1,18 @@
 package deploy
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kotlovyim-dev/kayly/internal/config"
 	"github.com/kotlovyim-dev/kayly/internal/store"
@@ -169,5 +175,194 @@ func TestRemoveAddon(t *testing.T) {
 	h.mustDeploy()
 	if _, ok := h.rt.env("app_web_r1")["REDIS_URL"]; ok {
 		t.Error("REDIS_URL still injected after removal")
+	}
+}
+
+func TestFailuresAreReportedOnce(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	h.mustDeploy()
+	if _, err := h.d.AddAddon(ctx, "app", "postgres"); err != nil {
+		t.Fatal(err)
+	}
+	wantOne := func(what, sub string) {
+		t.Helper()
+		if len(h.alerts) != 1 || !strings.Contains(h.alerts[0], sub) {
+			t.Fatalf("%s: alerts = %q, want one containing %q", what, h.alerts, sub)
+		}
+		h.alerts = nil
+	}
+
+	h.rt.hook = failOn("Exec", "app_postgres")
+	if _, _, err := h.deploy(); err == nil {
+		t.Fatal("deploy with a failing backup succeeded")
+	}
+	wantOne("backup before a release", "deploy r2 failed")
+
+	if _, err := h.d.BackupNow(ctx, "app"); err == nil {
+		t.Fatal("manual backup succeeded")
+	}
+	wantOne("manual backup", "backup failed")
+
+	h.rt.hook = nil
+	h.mustDeploy()
+	h.rt.crashOnStart["app_web_r1"] = true
+	if err := h.d.Rollback(ctx, "app", 1, io.Discard); err == nil {
+		t.Fatal("rollback succeeded")
+	}
+	wantOne("rollback", "rollback to r1 failed")
+
+	h.mustDeploy()
+	if len(h.alerts) != 0 {
+		t.Fatalf("a good deploy alerted: %q", h.alerts)
+	}
+}
+
+func backupNames(t *testing.T, h *harness) []string {
+	t.Helper()
+	all, err := h.d.Backups("app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, b := range all {
+		out = append(out, b.Name[strings.IndexByte(b.Name, '.')+1:])
+	}
+	slices.Sort(out)
+	return out
+}
+
+func TestBackupNowCoversDatabasesAndVolumes(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	h.mustDeploy()
+	for _, k := range []string{"postgres", "redis"} {
+		if _, err := h.d.AddAddon(ctx, "app", k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bs, err := h.d.BackupNow(ctx, "app")
+	if err != nil || len(bs) != 3 {
+		t.Fatalf("backups = %+v, %v", bs, err)
+	}
+	if got, want := backupNames(t, h), []string{"dump", "rdb", "vol-data.tar"}; !slices.Equal(got, want) {
+		t.Fatalf("kinds = %v, want %v", got, want)
+	}
+	for _, b := range bs {
+		path, err := h.d.BackupPath("app", b.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body, _ := os.ReadFile(path); len(body) == 0 {
+			t.Errorf("%s is empty", b.Name)
+		}
+	}
+	if len(h.rt.serviceNames()) != 2 || slices.Contains(h.rt.removed, "app_backup_data") == false {
+		t.Errorf("the tar container was not cleaned up: removed %v", h.rt.removed)
+	}
+}
+
+func TestOneFailingTargetDoesNotHideTheOthers(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	h.mustDeploy()
+	if _, err := h.d.AddAddon(ctx, "app", "redis"); err != nil {
+		t.Fatal(err)
+	}
+	h.rt.hook = failOn("Run", "app_backup_data")
+	bs, err := h.d.BackupNow(ctx, "app")
+	if err == nil || len(bs) != 1 || !strings.HasSuffix(bs[0].Name, ".rdb") {
+		t.Fatalf("backups = %+v, err = %v", bs, err)
+	}
+	if len(h.alerts) != 1 || !strings.Contains(h.alerts[0], "vol-data.tar") {
+		t.Fatalf("alerts = %q", h.alerts)
+	}
+}
+
+func TestRetentionIsPerKind(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	h.mustDeploy()
+	if _, err := h.d.AddAddon(ctx, "app", "redis"); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(h.backups, "app")
+	must(t, os.MkdirAll(dir, 0o700))
+	for i := range 20 { // old: sort before anything made now
+		ts := fmt.Sprintf("2020010%dT0000%02dZ", 1+i/10, i)
+		must(t, os.WriteFile(filepath.Join(dir, ts+"-daily.rdb"), []byte("x"), 0o600))
+	}
+	if _, err := h.d.BackupNow(ctx, "app"); err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, n := range backupNames(t, h) {
+		counts[n]++
+	}
+	if counts["rdb"] != keepBackups || counts["vol-data.tar"] != 1 {
+		t.Fatalf("counts = %v", counts)
+	}
+}
+
+func TestDailyBackupsOnlyRefreshStaleKinds(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	h.mustDeploy()
+	if _, err := h.d.AddAddon(ctx, "app", "redis"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.d.BackupNow(ctx, "app"); err != nil {
+		t.Fatal(err)
+	}
+	h.d.DailyBackups(ctx)
+	if n := len(backupNames(t, h)); n != 2 {
+		t.Fatalf("fresh backups were repeated: %d files", n)
+	}
+	all, _ := h.d.Backups("app")
+	for _, b := range all {
+		if strings.HasSuffix(b.Name, ".rdb") {
+			old := time.Now().Add(-48 * time.Hour)
+			must(t, os.Chtimes(filepath.Join(h.backups, "app", b.Name), old, old))
+		}
+	}
+	h.d.DailyBackups(ctx)
+	if got := backupNames(t, h); !slices.Equal(got, []string{"rdb", "rdb", "vol-data.tar"}) {
+		t.Fatalf("kinds = %v", got)
+	}
+}
+
+func TestKaylySnapshotCarriesDatabaseAndKey(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	h.mustDeploy()
+	b, err := h.d.SnapshotKayly(ctx, "manual")
+	if err != nil || !strings.HasSuffix(b.Name, ".kayly.tar") {
+		t.Fatalf("snapshot = %+v, %v", b, err)
+	}
+	f, err := os.Open(filepath.Join(h.backups, KaylyBackups, b.Name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	got := map[string]string{}
+	for tr := tar.NewReader(f); ; {
+		hdr, err := tr.Next()
+		if err != nil {
+			break
+		}
+		body, _ := io.ReadAll(tr)
+		got[hdr.Name] = string(body)
+	}
+	if got["master.key"] != "the-master-key" || !strings.HasPrefix(got["kayly.db"], "SQLite format 3") {
+		t.Fatalf("archive holds %d entries; key %q", len(got), got["master.key"])
+	}
+	// No scratch file may linger where the backup list or the uploader could pick it up.
+	entries, _ := os.ReadDir(filepath.Join(h.backups, KaylyBackups))
+	if len(entries) != 1 {
+		t.Fatalf("directory holds %d entries, want only the backup", len(entries))
+	}
+	h.d.DailyBackups(ctx)
+	if all, _ := h.d.Backups(KaylyBackups); len(all) != 1 {
+		t.Fatalf("a fresh snapshot was repeated: %d", len(all))
 	}
 }

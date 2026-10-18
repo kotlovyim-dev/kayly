@@ -25,6 +25,8 @@ import (
 
 	"github.com/kotlovyim-dev/kayly/internal/config"
 	"github.com/kotlovyim-dev/kayly/internal/deploy"
+	"github.com/kotlovyim-dev/kayly/internal/notify"
+	"github.com/kotlovyim-dev/kayly/internal/offsite"
 	"github.com/kotlovyim-dev/kayly/internal/store"
 )
 
@@ -37,6 +39,10 @@ type Server struct {
 	log     *slog.Logger
 	// UI holds the built web UI (index.html at its root), served on the public listener.
 	UI fs.FS
+	// Notifier delivers alerts and holds their targets. Nil disables the notification routes' effect.
+	Notifier *notify.Notifier
+	// Offsite uploads backups to the owner's bucket.
+	Offsite *offsite.Manager
 }
 
 // New returns a Server. workDir must exist.
@@ -68,6 +74,12 @@ func (s *Server) Handler(trusted bool) http.Handler {
 	mux.HandleFunc("GET /api/v1/projects/{project}/domains", s.listDomains)
 	mux.HandleFunc("POST /api/v1/projects/{project}/domains", s.addDomain)
 	mux.HandleFunc("DELETE /api/v1/projects/{project}/domains/{hostname}", s.removeDomain)
+	mux.HandleFunc("GET /api/v1/notifications", s.getNotifications)
+	mux.HandleFunc("PUT /api/v1/notifications", s.setNotifications)
+	mux.HandleFunc("POST /api/v1/notifications/test", s.testNotifications)
+	mux.HandleFunc("GET /api/v1/offsite", s.getOffsite)
+	mux.HandleFunc("PUT /api/v1/offsite", s.setOffsite)
+	mux.HandleFunc("POST /api/v1/offsite/sync", s.syncOffsite)
 	if trusted {
 		mux.HandleFunc("GET /api/v1/tokens", s.listTokens)
 		mux.HandleFunc("POST /api/v1/tokens", s.createToken)
@@ -337,12 +349,15 @@ func (s *Server) listBackups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createBackup(w http.ResponseWriter, r *http.Request) {
-	b, err := s.deployer.BackupNow(context.WithoutCancel(r.Context()), r.PathValue("project"))
+	bs, err := s.deployer.BackupNow(context.WithoutCancel(r.Context()), r.PathValue("project"))
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, b)
+	if bs == nil {
+		bs = []deploy.Backup{}
+	}
+	writeJSON(w, http.StatusCreated, bs)
 }
 
 func (s *Server) downloadBackup(w http.ResponseWriter, r *http.Request) {
@@ -650,6 +665,101 @@ func (s *Server) project(w http.ResponseWriter, r *http.Request) (store.Project,
 
 // fail answers an error: 404 for missing things, 400 with the message otherwise. Kayly's
 // errors are written for the person reading them, so the message is shown as is.
+// NotificationsView says what is configured without returning a secret: the bot token and
+// the webhook URL (which may carry one) are write-only.
+type NotificationsView struct {
+	Telegram     bool   `json:"telegram"`
+	TelegramChat string `json:"telegram_chat,omitempty"`
+	Webhook      bool   `json:"webhook"`
+}
+
+func (s *Server) getNotifications(w http.ResponseWriter, r *http.Request) {
+	t, err := s.Notifier.Targets(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, NotificationsView{
+		Telegram: t.TelegramToken != "", TelegramChat: t.TelegramChat, Webhook: t.WebhookURL != "",
+	})
+}
+
+// setNotifications changes the targets named in the body and keeps the rest; "" clears one.
+func (s *Server) setNotifications(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TelegramToken *string `json:"telegram_token"`
+		TelegramChat  *string `json:"telegram_chat"`
+		WebhookURL    *string `json:"webhook_url"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	t, err := s.Notifier.Targets(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	for dst, src := range map[*string]*string{&t.TelegramToken: body.TelegramToken, &t.TelegramChat: body.TelegramChat, &t.WebhookURL: body.WebhookURL} {
+		if src != nil {
+			*dst = *src
+		}
+	}
+	if err := s.Notifier.SetTargets(r.Context(), t); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_notifications", err.Error(), "")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) testNotifications(w http.ResponseWriter, r *http.Request) {
+	if err := s.Notifier.Send(r.Context(), "✓ Kayly can reach you here."); err != nil {
+		writeError(w, http.StatusBadGateway, "notify_failed", err.Error(), "check the bot token, the chat id and the webhook URL")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) getOffsite(w http.ResponseWriter, r *http.Request) {
+	st, err := s.Offsite.Status(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+// setOffsite stores the bucket. The answer carries the recovery key the first time and never
+// again, so the owner must save it now.
+func (s *Server) setOffsite(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Endpoint  string `json:"endpoint"`
+		Region    string `json:"region"`
+		Bucket    string `json:"bucket"`
+		AccessKey string `json:"access_key"`
+		SecretKey string `json:"secret_key"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	key, err := s.Offsite.Configure(r.Context(), offsite.Config{
+		Endpoint: body.Endpoint, Region: body.Region, Bucket: body.Bucket,
+		AccessKey: body.AccessKey, SecretKey: body.SecretKey,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_offsite", err.Error(), "check the endpoint, bucket and keys")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"recovery_key": key})
+}
+
+func (s *Server) syncOffsite(w http.ResponseWriter, r *http.Request) {
+	if err := s.Offsite.Sync(context.WithoutCancel(r.Context())); err != nil {
+		writeError(w, http.StatusBadGateway, "offsite_failed", err.Error(), "")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", err.Error(), "")

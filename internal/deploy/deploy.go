@@ -44,6 +44,10 @@ type Options struct {
 	KeepImages int
 	// BackupDir holds database dumps, one directory per project. Empty disables backups.
 	BackupDir string
+	// KeyFile is the master key, which a Kayly backup carries with the database snapshot.
+	KeyFile string
+	// Notify tells the owner about a failure. Nil sends nothing.
+	Notify func(ctx context.Context, text string)
 }
 
 // Deployer runs deploys, rollbacks and reconciliation. It is safe for concurrent use;
@@ -87,6 +91,14 @@ func New(st *store.Store, rt Runtime, b Builder, p Proxy, opt Options, log *slog
 		locks:       map[string]*sync.Mutex{},
 		checkHealth: probe,
 		settle:      10 * time.Second,
+	}
+}
+
+// alert reports a failure to the owner. It must not block the caller's cleanup on a dead
+// ctx, so it detaches from cancellation.
+func (d *Deployer) alert(ctx context.Context, format string, args ...any) {
+	if d.opt.Notify != nil {
+		d.opt.Notify(context.WithoutCancel(ctx), fmt.Sprintf(format, args...))
 	}
 }
 
@@ -165,6 +177,11 @@ func (d *Deployer) abandon(ctx context.Context, p store.Project, rel store.Relea
 	}
 	fmt.Fprintf(w, "\n✗ r%d failed: %v\n", rel.Seq, cause)
 	log.Warn("release failed", "err", cause)
+	msg := fmt.Sprintf("✗ %s: deploy r%d failed: %v", p.Name, rel.Seq, cause)
+	if p.ActiveRelease != 0 {
+		msg += "\nThe live release is untouched."
+	}
+	d.alert(ctx, "%s", msg)
 }
 
 // release takes a created release through every step: env, image (from makeImage), add-ons,
@@ -252,6 +269,7 @@ func (d *Deployer) Rollback(ctx context.Context, project string, seq int, w io.W
 		if rerr := d.reconcileProject(cctx, p.Name); rerr != nil {
 			d.log.Error("restore live release", "project", p.Name, "err", rerr)
 		}
+		d.alert(ctx, "✗ %s: rollback to r%d failed: %v", p.Name, seq, err)
 		return err
 	}
 	fmt.Fprintf(w, "\n✓ r%d is live again\n", seq)

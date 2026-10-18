@@ -19,6 +19,8 @@ import (
 	"github.com/kotlovyim-dev/kayly/internal/build"
 	"github.com/kotlovyim-dev/kayly/internal/deploy"
 	"github.com/kotlovyim-dev/kayly/internal/docker"
+	"github.com/kotlovyim-dev/kayly/internal/notify"
+	"github.com/kotlovyim-dev/kayly/internal/offsite"
 	"github.com/kotlovyim-dev/kayly/internal/proxy"
 	"github.com/kotlovyim-dev/kayly/internal/secret"
 	"github.com/kotlovyim-dev/kayly/internal/store"
@@ -117,6 +119,8 @@ func serve(args []string) error {
 		return err
 	}
 	px := proxy.NewClient(p.caddySock())
+	notifier := notify.New(st, log)
+	uploader := offsite.New(st, p.backups(), notifier.Notify, log)
 	d := deploy.New(st, rt,
 		&build.Builder{Docker: "docker", Railpack: *railpack, Frontend: railpackFrontend},
 		px,
@@ -125,6 +129,8 @@ func serve(args []string) error {
 			Proxy:       proxy.Options{AdminListen: adminListen, Email: *email},
 			ExtraRoutes: []proxy.Route{{Host: *domain, Upstream: "unix/" + p.publicSock()}},
 			BackupDir:   p.backups(),
+			Notify:      notifier.Notify,
+			KeyFile:     p.key(),
 		}, log)
 
 	if err := waitForSocket(ctx, p.caddySock(), time.Minute); err != nil {
@@ -136,6 +142,8 @@ func serve(args []string) error {
 	}
 
 	srv := api.New(st, d, p.builds(), log)
+	srv.Notifier = notifier
+	srv.Offsite = uploader
 	srv.UI = web.UI()
 	if srv.UI == nil {
 		log.Warn("this build has no web UI; build it with `npm run build` in web/")
@@ -174,6 +182,21 @@ func serve(args []string) error {
 				log.Error("ensure proxy", "err", err)
 			}
 			d.DailyBackups(ctx)
+		}
+	}()
+	// Backups reach the bucket within minutes of being written; an outage only delays them.
+	go func() {
+		t := time.NewTicker(5 * time.Minute)
+		defer t.Stop()
+		for {
+			if err := uploader.Sync(ctx); err != nil {
+				log.Error("off-site sync", "err", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
 		}
 	}()
 	log.Info("kayly serving", "api", "https://"+*domain, "admin_socket", adminSock(*run))

@@ -27,7 +27,7 @@ export function Settings({
   onChanged: () => void;
   onDomainsChanged: () => void;
 }) {
-  const postgres = detail.addons.some((a) => a.kind === 'postgres');
+  const hasAddons = detail.addons.length > 0;
   return (
     <div className="grid gap-3 sm:gap-5 lg:h-full lg:grid-cols-2">
       <div className="flex min-h-0 flex-col gap-3 sm:gap-5">
@@ -35,8 +35,8 @@ export function Settings({
         <Env name={detail.name} keys={detail.env_keys} onChanged={onChanged} />
       </div>
       <div className="flex min-h-0 flex-col gap-3 sm:gap-5">
-        <Domains detail={detail} onChanged={onDomainsChanged} className={postgres ? 'max-lg:shrink-0 lg:max-h-[45%]' : 'max-lg:shrink-0 lg:flex-1'} />
-        {postgres && <Backups name={detail.name} />}
+        <Domains detail={detail} onChanged={onDomainsChanged} className={hasAddons ? 'max-lg:shrink-0 lg:max-h-[45%]' : 'max-lg:shrink-0 lg:flex-1'} />
+        {hasAddons && <Backups name={detail.name} />}
       </div>
     </div>
   );
@@ -337,9 +337,12 @@ function Domains({ detail, onChanged, className }: { detail: ProjectDetail; onCh
 }
 
 /** "20261017T154007Z-before-r3.dump" → "before r3". */
-function backupReason(b: Backup) {
-  const m = /-([a-z0-9-]+)\.dump$/.exec(b.name);
-  return m ? m[1].replace('-', ' ') : '';
+// A backup is named <time>-<reason>.<kind>: dump (Postgres), rdb (Redis) or vol-<name>.tar.
+function backupLabel(b: Backup) {
+  const m = /Z-([a-z0-9-]+)\.(dump|rdb|vol-[a-z0-9-]+\.tar)$/.exec(b.name);
+  if (!m) return '';
+  const what = m[2] === 'dump' ? 'postgres' : m[2] === 'rdb' ? 'redis' : m[2].slice(4, -4);
+  return `${what} · ${m[1].replace('-', ' ')}`;
 }
 
 function Backups({ name }: { name: string }) {
@@ -354,7 +357,7 @@ function Backups({ name }: { name: string }) {
   return (
     <Pane
       id="backups"
-      title={list && list.length > 0 ? `Database backups · ${list.length}` : 'Database backups'}
+      title={list && list.length > 0 ? `Backups · ${list.length}` : 'Backups'}
       className="lg:flex-1"
       action={
         <Button
@@ -383,7 +386,7 @@ function Backups({ name }: { name: string }) {
         </div>
       ) : null}
       {list && list.length === 0 && (
-        <p className="px-4 py-3 text-meta text-ink-2">Kayly backs up Postgres daily and before every release step.</p>
+        <p className="px-4 py-3 text-meta text-ink-2">Kayly backs up Postgres, Redis and volumes daily, and Postgres before every release step.</p>
       )}
       {list && list.length > 0 && (
         <ul>
@@ -392,7 +395,7 @@ function Backups({ name }: { name: string }) {
               <span className="min-w-0 flex-1">
                 <When at={b.created_at} />
               </span>
-              <span className="font-mono text-meta text-ink-2">{backupReason(b)}</span>
+              <span className="font-mono text-meta text-ink-2">{backupLabel(b)}</span>
               <span className="w-16 text-right text-meta text-ink-2 tabular-nums">{formatBytes(b.size)}</span>
               <a
                 href={api.backupURL(name, b.name)}

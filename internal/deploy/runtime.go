@@ -29,6 +29,7 @@ type Runtime interface {
 	// List returns every container carrying the LabelProject label.
 	List(ctx context.Context) ([]Container, error)
 	ImageExists(ctx context.Context, ref string) (bool, error)
+	PullImage(ctx context.Context, ref string) error
 	RemoveImage(ctx context.Context, ref string) error
 	// TagImage gives an existing image a second name.
 	TagImage(ctx context.Context, src, dst string) error
@@ -112,10 +113,9 @@ type Network struct {
 
 // Mount mounts a named volume, or a host directory (Bind), at Path.
 type Mount struct {
-	Volume string
-	Bind   string
-	Path   string
-	// ReadOnly applies to bind mounts.
+	Volume   string
+	Bind     string
+	Path     string
 	ReadOnly bool
 }
 
@@ -145,6 +145,7 @@ const (
 	RoleService = "service"
 	RoleRelease = "release"
 	RoleAddon   = "addon"
+	RoleBackup  = "backup"
 )
 
 // EdgeNetwork is shared by the proxy and every service with a port.

@@ -17,10 +17,12 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/kotlovyim-dev/kayly/internal/api"
 	"github.com/kotlovyim-dev/kayly/internal/config"
 	"github.com/kotlovyim-dev/kayly/internal/deploy"
+	"github.com/kotlovyim-dev/kayly/internal/offsite"
 )
 
 const usage = `kayly deploys apps to your own server.
@@ -42,6 +44,10 @@ Anywhere:
   kayly domains ls | add <hostname> <service> | rm <hostname> [-p project]
   kayly addons ls | add <postgres|redis> | rm <kind> [-p project]
   kayly backups ls | create | get <name> [-p project]
+  kayly backups setup <endpoint> <bucket> <access-key> [region]   off-site S3; the secret key comes on stdin
+  kayly backups status | sync
+  kayly notify ls | telegram <chat-id> | webhook <url> | off telegram|webhook | test
+                                            telegram reads the bot token from stdin
 
 The project defaults to the directory name. On the server, the CLI talks to the daemon's
 admin socket (in $KAYLY_RUN, default /run/kayly) and needs no login.
@@ -202,6 +208,8 @@ func runClientCommand(cmd string, args []string) error {
 		return c.domains(ctx, proj, pos)
 	case "token":
 		return c.tokens(ctx, pos)
+	case "notify":
+		return c.notify(ctx, pos)
 	}
 	return fmt.Errorf("unknown command %q; run kayly help", cmd)
 }
@@ -290,6 +298,9 @@ func (c *client) addons(ctx context.Context, proj func(string) (string, error), 
 }
 
 func (c *client) backups(ctx context.Context, proj func(string) (string, error), pos []string) error {
+	if len(pos) > 0 && (pos[0] == "setup" || pos[0] == "status" || pos[0] == "sync") {
+		return c.offsite(ctx, pos)
+	}
 	name, err := proj(".")
 	if err != nil {
 		return err
@@ -308,11 +319,16 @@ func (c *client) backups(ctx context.Context, proj func(string) (string, error),
 		}
 		return tw.Flush()
 	case pos[0] == "create":
-		var b deploy.Backup
-		if err := c.do(ctx, "POST", base, nil, &b); err != nil {
+		var bs []deploy.Backup
+		if err := c.do(ctx, "POST", base, nil, &bs); err != nil {
 			return err
 		}
-		fmt.Printf("%s (%d KB)\n", b.Name, b.Size/1024)
+		if len(bs) == 0 {
+			fmt.Println("nothing to back up: the project has no database add-on or volume")
+		}
+		for _, b := range bs {
+			fmt.Printf("%s (%d KB)\n", b.Name, b.Size/1024)
+		}
 		return nil
 	case pos[0] == "get" && len(pos) == 2:
 		resp, err := c.request(ctx, "GET", base+"/"+url.PathEscape(pos[1]), "", nil)
@@ -328,10 +344,59 @@ func (c *client) backups(ctx context.Context, proj func(string) (string, error),
 			f.Close()
 			return err
 		}
-		fmt.Printf("saved %s; restore with: pg_restore --clean --no-owner -d <database url> %s\n", f.Name(), f.Name())
+		fmt.Printf("saved %s\n", f.Name())
+		if strings.HasSuffix(f.Name(), ".dump") {
+			fmt.Printf("restore with: pg_restore --clean --no-owner -d <database url> %s\n", f.Name())
+		}
 		return f.Close()
 	}
 	return errors.New("usage: kayly backups ls | create | get <name>")
+}
+
+func (c *client) offsite(ctx context.Context, pos []string) error {
+	const path = "/api/v1/offsite"
+	switch {
+	case pos[0] == "status" && len(pos) == 1:
+		var st offsite.Status
+		if err := c.do(ctx, "GET", path, nil, &st); err != nil {
+			return err
+		}
+		if !st.Configured {
+			fmt.Println("off-site backups are not set up: kayly backups setup <endpoint> <bucket> <access-key>")
+			return nil
+		}
+		fmt.Printf("bucket %s at %s\nlast sync: %s\n", st.Bucket, st.Endpoint, st.LastSync.Format(time.RFC3339))
+		if st.LastError != "" {
+			fmt.Printf("last error: %s\n", st.LastError)
+		}
+		return nil
+	case pos[0] == "sync" && len(pos) == 1:
+		return c.do(ctx, "POST", path+"/sync", nil, nil)
+	case pos[0] == "setup" && (len(pos) == 4 || len(pos) == 5):
+		secretKey, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if secretKey = strings.TrimSpace(secretKey); secretKey == "" {
+			return fmt.Errorf("pipe the secret key on stdin (%v)", err)
+		}
+		body := map[string]string{"endpoint": pos[1], "bucket": pos[2], "access_key": pos[3], "secret_key": secretKey}
+		if len(pos) == 5 {
+			body["region"] = pos[4]
+		}
+		var out struct {
+			RecoveryKey string `json:"recovery_key"`
+		}
+		if err := c.do(ctx, "PUT", path, body, &out); err != nil {
+			return err
+		}
+		if out.RecoveryKey == "" {
+			fmt.Println("bucket updated; the recovery key is unchanged")
+			return nil
+		}
+		fmt.Printf("RECOVERY KEY (shown once; store it off this server, e.g. in a password manager):\n\n  %s\n\n"+
+			"Backups in the bucket are encrypted with it. Without it they cannot be read; with it and the bucket,\n"+
+			"anyone can read them.\n", out.RecoveryKey)
+		return nil
+	}
+	return errors.New("usage: kayly backups setup <endpoint> <bucket> <access-key> [region] | status | sync")
 }
 
 func (c *client) domains(ctx context.Context, proj func(string) (string, error), pos []string) error {
@@ -387,6 +452,35 @@ func (c *client) tokens(ctx context.Context, pos []string) error {
 		return c.do(ctx, "DELETE", "/api/v1/tokens/"+pos[1], nil, nil)
 	}
 	return errors.New("usage: kayly token create <name> | ls | rm <id>")
+}
+
+func (c *client) notify(ctx context.Context, pos []string) error {
+	const path = "/api/v1/notifications"
+	set := func(body map[string]string) error { return c.do(ctx, "PUT", path, body, nil) }
+	switch {
+	case len(pos) == 1 && pos[0] == "ls":
+		var v api.NotificationsView
+		if err := c.do(ctx, "GET", path, nil, &v); err != nil {
+			return err
+		}
+		fmt.Printf("telegram: %v (chat %s)\nwebhook:  %v\n", v.Telegram, v.TelegramChat, v.Webhook)
+		return nil
+	case len(pos) == 2 && pos[0] == "telegram":
+		token, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if token = strings.TrimSpace(token); token == "" {
+			return fmt.Errorf("pipe the bot token on stdin (%v)", err)
+		}
+		return set(map[string]string{"telegram_token": token, "telegram_chat": pos[1]})
+	case len(pos) == 2 && pos[0] == "webhook":
+		return set(map[string]string{"webhook_url": pos[1]})
+	case len(pos) == 2 && pos[0] == "off" && pos[1] == "telegram":
+		return set(map[string]string{"telegram_token": "", "telegram_chat": ""})
+	case len(pos) == 2 && pos[0] == "off" && pos[1] == "webhook":
+		return set(map[string]string{"webhook_url": ""})
+	case len(pos) == 1 && pos[0] == "test":
+		return c.do(ctx, "POST", path+"/test", nil, nil)
+	}
+	return errors.New("usage: kayly notify ls | telegram <chat-id> | webhook <url> | off telegram|webhook | test")
 }
 
 // deploy packs dir, creates the project on first use and streams the deploy.

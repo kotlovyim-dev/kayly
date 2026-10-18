@@ -109,6 +109,11 @@ CREATE TABLE addon (
 	created_at INTEGER NOT NULL,
 	UNIQUE (project_id, kind)
 );
+`, `
+CREATE TABLE setting (
+	key   TEXT PRIMARY KEY,
+	value BLOB NOT NULL
+);
 `}
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -572,6 +577,48 @@ func (s *Store) RemoveAddon(ctx context.Context, projectID int64, kind string) e
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("add-on %s: %w", kind, ErrNotFound)
+	}
+	return nil
+}
+
+// Setting returns a server-wide value, or "" if it was never set. Values are encrypted.
+func (s *Store) Setting(ctx context.Context, key string) (string, error) {
+	var sealed []byte
+	err := s.db.QueryRowContext(ctx, "SELECT value FROM setting WHERE key = ?", key).Scan(&sealed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: setting %s: %w", key, err)
+	}
+	v, err := s.box.Open(sealed)
+	if err != nil {
+		return "", fmt.Errorf("store: setting %s: %w", key, err)
+	}
+	return string(v), nil
+}
+
+// SetSetting stores a server-wide value; an empty value removes it.
+func (s *Store) SetSetting(ctx context.Context, key, value string) error {
+	var err error
+	if value == "" {
+		_, err = s.db.ExecContext(ctx, "DELETE FROM setting WHERE key = ?", key)
+	} else {
+		_, err = s.db.ExecContext(ctx,
+			"INSERT INTO setting (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+			key, s.box.Seal([]byte(value)))
+	}
+	if err != nil {
+		return fmt.Errorf("store: set %s: %w", key, err)
+	}
+	return nil
+}
+
+// Snapshot writes a consistent copy of the database to path, which must not exist or be
+// empty. It is safe while the daemon is writing.
+func (s *Store) Snapshot(ctx context.Context, path string) error {
+	if _, err := s.db.ExecContext(ctx, "VACUUM INTO ?", path); err != nil {
+		return fmt.Errorf("store: snapshot: %w", err)
 	}
 	return nil
 }

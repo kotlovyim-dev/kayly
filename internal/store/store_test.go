@@ -211,3 +211,29 @@ func TestAddons(t *testing.T) {
 		t.Errorf("second remove: %v", err)
 	}
 }
+
+func TestSettings(t *testing.T) {
+	ctx := context.Background()
+	s, _ := open(t)
+	if v, err := s.Setting(ctx, "k"); err != nil || v != "" {
+		t.Fatalf("unset = %q, %v", v, err)
+	}
+	for _, v := range []string{"one", "two"} {
+		if err := s.SetSetting(ctx, "k", v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if v, _ := s.Setting(ctx, "k"); v != "two" {
+		t.Fatalf("got %q", v)
+	}
+	var raw []byte
+	if err := s.db.QueryRow("SELECT value FROM setting").Scan(&raw); err != nil || bytes.Contains(raw, []byte("two")) {
+		t.Fatalf("value stored in the clear: %v", err)
+	}
+	if err := s.SetSetting(ctx, "k", ""); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := s.Setting(ctx, "k"); v != "" {
+		t.Fatalf("not removed: %q", v)
+	}
+}

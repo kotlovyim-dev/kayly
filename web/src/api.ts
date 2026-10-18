@@ -108,7 +108,7 @@ export const api = {
   removeAddon: (name: string, kind: AddonKind) => json<void>('DELETE', `${p(name)}/addons/${kind}`),
 
   backups: (name: string) => json<Backup[]>('GET', `${p(name)}/backups`),
-  createBackup: (name: string) => json<Backup>('POST', `${p(name)}/backups`),
+  createBackup: (name: string) => json<Backup[]>('POST', `${p(name)}/backups`),
   backupURL: (name: string, backup: string) => `/api/v1${p(name)}/backups/${encodeURIComponent(backup)}`,
 
   redeploy: (name: string, onLog: (text: string) => void) =>

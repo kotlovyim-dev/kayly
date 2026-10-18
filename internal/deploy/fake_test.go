@@ -6,6 +6,9 @@ import (
 	"io"
 	"maps"
 	"net"
+	"os"
+	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -94,8 +97,21 @@ func (f *fakeRuntime) Run(_ context.Context, spec Spec) error {
 		}
 	}
 	for _, m := range spec.Mounts {
+		if m.Bind != "" {
+			continue
+		}
 		if !f.volumes[m.Volume] {
 			return fmt.Errorf("no volume %s", m.Volume)
+		}
+	}
+	if spec.Labels[LabelRole] == RoleBackup {
+		// A volume backup: tar -C /data -cf /out/<file> .
+		for _, m := range spec.Mounts {
+			if m.Bind != "" {
+				if err := os.WriteFile(filepath.Join(m.Bind, path.Base(spec.Cmd[4])), []byte("tar of "+spec.Cmd[2]), 0o600); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	c := &fakeContainer{spec: spec, running: true}
@@ -187,6 +203,13 @@ func (f *fakeRuntime) ImageExists(_ context.Context, ref string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.images[ref], nil
+}
+
+func (f *fakeRuntime) PullImage(_ context.Context, ref string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.images[ref] = true
+	return nil
 }
 
 func (f *fakeRuntime) RemoveImage(_ context.Context, ref string) error {

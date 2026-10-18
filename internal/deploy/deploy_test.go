@@ -48,6 +48,9 @@ type harness struct {
 	dir string
 	// backups is the Deployer's BackupDir.
 	backups string
+	keyFile string
+	// alerts are the notifications the Deployer sent.
+	alerts []string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -68,6 +71,8 @@ func newHarness(t *testing.T) *harness {
 
 	h := &harness{t: t, st: st, rt: newFakeRuntime(), px: &fakeProxy{}, dir: t.TempDir(), backups: t.TempDir()}
 	h.writeConfig(app)
+	h.keyFile = filepath.Join(t.TempDir(), "master.key")
+	must(t, os.WriteFile(h.keyFile, []byte("the-master-key"), 0o600))
 	h.d = h.newDeployer()
 	return h
 }
@@ -81,6 +86,8 @@ func (h *harness) newDeployer() *Deployer {
 		HealthTimeout: 300 * time.Millisecond,
 		KeepImages:    2,
 		BackupDir:     h.backups,
+		KeyFile:       h.keyFile,
+		Notify:        func(_ context.Context, text string) { h.alerts = append(h.alerts, text) },
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	d.checkHealth = h.rt.health
 	d.settle = 0
