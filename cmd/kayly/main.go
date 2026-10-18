@@ -37,6 +37,7 @@ Anywhere:
   kayly login <url> <token>                 remember a server
   kayly deploy [dir] [-p project]           build and release dir (default .)
   kayly projects                            list projects
+  kayly status [-p project]                 the server, and the services of one project or of all: state, restarts, CPU, memory
   kayly releases [-p project]               list releases
   kayly releases log <release> [-p project] the output of that deploy
   kayly rollback <release> [-p project]     make an earlier release live again
@@ -59,6 +60,9 @@ Anywhere:
 The project defaults to the directory name. On the server, the CLI talks to the daemon's
 admin socket (in $KAYLY_RUN, default /run/kayly) and needs no login.
 `
+
+// version is set at release time: -ldflags "-X main.version=v0.2.0".
+var version = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -158,6 +162,8 @@ func runClientCommand(cmd string, args []string) error {
 			fmt.Fprintf(tw, "%s\t%s\t%s\n", p.Name, live, p.LiveSince)
 		}
 		return tw.Flush()
+	case "status":
+		return c.status(ctx, *project)
 	case "releases":
 		name, err := proj(".")
 		if err != nil {
@@ -367,6 +373,52 @@ func (c *client) backups(ctx context.Context, proj func(string) (string, error),
 		return f.Close()
 	}
 	return errors.New("usage: kayly backups ls | create | get <name> | restore <name|latest> | setup | status | sync | drill")
+}
+
+// status prints the server's disk and memory, then the services of one project, or of all.
+func (c *client) status(ctx context.Context, project string) error {
+	var sv api.ServerView
+	if err := c.do(ctx, "GET", "/api/v1/server", nil, &sv); err != nil {
+		return err
+	}
+	fmt.Printf("kayly %s, docker %s\ndisk   %s of %s used\nmemory %s of %s available\n",
+		sv.Version, sv.DockerVersion, deploy.HumanBytes(sv.DiskUsed), deploy.HumanBytes(sv.DiskTotal),
+		deploy.HumanBytes(sv.MemoryFree), deploy.HumanBytes(sv.MemoryTotal))
+	names := []string{project}
+	if project == "" {
+		var ps []api.ProjectView
+		if err := c.do(ctx, "GET", "/api/v1/projects", nil, &ps); err != nil {
+			return err
+		}
+		names = nil
+		for _, p := range ps {
+			names = append(names, p.Name)
+		}
+	}
+	for _, name := range names {
+		var svcs []deploy.ServiceView
+		if err := c.do(ctx, "GET", "/api/v1/projects/"+name+"/services", nil, &svcs); err != nil {
+			return err
+		}
+		fmt.Printf("\n%s\n", name)
+		tw := table()
+		fmt.Fprintln(tw, "  SERVICE\tSTATE\tRESTARTS\tCPU\tMEMORY")
+		for _, s := range svcs {
+			cpu, mem := "-", "-"
+			if s.Stats != nil {
+				cpu = fmt.Sprintf("%.1f%%", s.Stats.CPUPercent)
+				mem = deploy.HumanBytes(s.Stats.MemoryBytes)
+				if s.MemoryLimit > 0 {
+					mem += " / " + deploy.HumanBytes(s.MemoryLimit)
+				}
+			}
+			fmt.Fprintf(tw, "  %s\t%s\t%d\t%s\t%s\n", s.Name, s.State, s.Restarts, cpu, mem)
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *client) releaseLog(ctx context.Context, project, release string) error {

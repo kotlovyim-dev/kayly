@@ -1,7 +1,7 @@
-import { Fragment, useEffect, useRef } from 'react';
-import type { ProjectDetail, Release, ReleaseStatus } from './api';
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { api, type ProjectDetail, type Release, type ReleaseStatus, type Service } from './api';
 import { type Operation, statusWord } from './project';
-import { ArmGo, Button, Command, Lamp, type LampState, Pane, When } from './ui';
+import { ArmGo, Button, Command, ErrorNote, formatBytes, Lamp, type LampState, Pane, When } from './ui';
 
 function lampFor(s: ReleaseStatus): LampState {
   if (s === 'live' || s === 'failed' || s === 'superseded') return s;
@@ -45,7 +45,7 @@ export function Overview({
         {op ? (
           <OperationPane op={op} onDismiss={onDismiss} />
         ) : (
-          shown && <ReleaseDetail release={shown} busy={busy} onRollback={onRollback} />
+          shown && <ReleaseDetail project={detail.name} release={shown} busy={busy} onRollback={onRollback} />
         )}
         <Services detail={detail} />
       </div>
@@ -77,7 +77,15 @@ export function Overview({
                   >
                     {statusWord[r.status]}
                   </span>
-                  {r.error && <span className="truncate text-meta text-ink-2">{r.error.split('\n')[0].replaceAll('`', '')}</span>}
+                  {r.error ? (
+                    <span className="truncate text-meta text-ink-2">{r.error.split('\n')[0].replaceAll('`', '')}</span>
+                  ) : (
+                    r.commit && (
+                      <span className="truncate text-meta text-ink-2" title={r.commit_message}>
+                        <code className="font-mono">{shortCommit(r.commit)}</code> {r.commit_message}
+                      </span>
+                    )
+                  )}
                 </span>
                 <span className="text-meta whitespace-nowrap text-ink-2">
                   <When at={r.created_at} />
@@ -91,7 +99,23 @@ export function Overview({
   );
 }
 
-function ReleaseDetail({ release: r, busy, onRollback }: { release: Release; busy: boolean; onRollback: (seq: number) => void }) {
+/** "3a77de6" for a commit, with a star when the work tree had uncommitted changes. */
+function shortCommit(commit: string) {
+  const dirty = commit.endsWith('-dirty');
+  return commit.slice(0, 7) + (dirty ? '*' : '');
+}
+
+function ReleaseDetail({
+  project,
+  release: r,
+  busy,
+  onRollback,
+}: {
+  project: string;
+  release: Release;
+  busy: boolean;
+  onRollback: (seq: number) => void;
+}) {
   return (
     <Pane
       id="release"
@@ -108,6 +132,13 @@ function ReleaseDetail({ release: r, busy, onRollback }: { release: Release; bus
         <p className="text-meta text-ink-2">
           Created <When at={r.created_at} /> · {new Date(r.created_at).toLocaleString()}
         </p>
+        {r.commit && (
+          <p className="text-meta text-ink-2">
+            Built from <code className="font-mono text-ink">{shortCommit(r.commit)}</code>
+            {r.commit.endsWith('-dirty') && ' with uncommitted changes'}
+            {r.commit_message && <> · {r.commit_message}</>}
+          </p>
+        )}
         {r.error && <FailureReason error={r.error} />}
         {r.status === 'live' && <p className="text-ink-2">Serving now. Redeploy runs this image again.</p>}
         {r.status === 'superseded' &&
@@ -123,8 +154,50 @@ function ReleaseDetail({ release: r, busy, onRollback }: { release: Release; bus
             <p className="text-ink-2">Its image was pruned, so it cannot be rolled back to.</p>
           ))}
         {r.status === 'failed' && <p className="text-ink-2">The live release kept serving.</p>}
+        <DeployLog key={r.seq} project={project} seq={r.seq} />
       </div>
     </Pane>
+  );
+}
+
+/** The output of the deploy that made a release, loaded when asked for. */
+function DeployLog({ project, seq }: { project: string; seq: number }) {
+  const [log, setLog] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  if (log !== null) {
+    return (
+      <pre
+        tabIndex={0}
+        aria-label={`Deploy log of r${seq}`}
+        className="max-h-72 overflow-auto rounded-[3px] bg-code p-3 font-mono text-meta whitespace-pre-wrap"
+      >
+        {log.replace(/^\n+/, '') || 'The deploy wrote nothing.'}
+      </pre>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <Button
+        small
+        busy={busy}
+        className="self-start"
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            setLog(await api.releaseLog(project, seq));
+          } catch (e) {
+            setError(e);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Show deploy log
+      </Button>
+      {error ? <ErrorNote error={error} /> : null}
+    </div>
   );
 }
 
@@ -209,17 +282,65 @@ function OperationPane({ op, onDismiss }: { op: Operation; onDismiss: () => void
   );
 }
 
+const POLL_MS = 10_000;
+
+/** The live release's services, refreshed every few seconds with CPU and memory. */
+function useServices(detail: ProjectDetail): Service[] {
+  const [fresh, setFresh] = useState<Service[] | null>(null);
+  const name = detail.name;
+  useEffect(() => {
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      try {
+        const svcs = await api.services(name);
+        if (!stop) setFresh(svcs);
+      } catch {
+        // keep showing the last answer; the project view already reports a broken API
+      }
+      if (!stop) timer = setTimeout(tick, POLL_MS);
+    };
+    void tick();
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [name, detail.live_release]);
+  return fresh ?? detail.services;
+}
+
+const serviceLamp: Record<Service['state'], LampState> = {
+  running: 'live',
+  restarting: 'standby',
+  exited: 'failed',
+  missing: 'failed',
+};
+
 function Services({ detail }: { detail: ProjectDetail }) {
-  if (detail.services.length === 0) return null;
+  const services = useServices(detail);
+  if (services.length === 0) return null;
   return (
     <Pane id="services" title="Services" className="max-lg:shrink-0 lg:flex-1">
       <ul>
-        {detail.services.map((s) => (
+        {services.map((s) => (
           <li key={s.name} className="flex min-h-11 flex-col justify-center gap-0.5 border-b border-rule px-4 py-2 last:border-b-0">
             <span className="flex items-baseline gap-2">
+              <Lamp state={serviceLamp[s.state] ?? 'off'} size={10} />
               <span className="font-semibold">{s.name}</span>
               <span className="text-meta text-ink-2">{s.port ? `port ${s.port}` : 'no port'}</span>
+              {s.state !== 'running' && <span className="text-meta font-semibold text-fail-ink">{s.state}</span>}
+              {s.restarts > 0 && (
+                <span className="text-meta text-ink-2">
+                  {s.restarts} restart{s.restarts === 1 ? '' : 's'}
+                </span>
+              )}
             </span>
+            {s.stats && (
+              <span className="font-mono text-meta text-ink-2">
+                {s.stats.cpu_percent.toFixed(1)}% CPU · {formatBytes(s.stats.memory_bytes)}
+                {s.memory_limit ? <> of {formatBytes(s.memory_limit)}</> : null}
+              </span>
+            )}
             {s.urls[0] ? (
               <a
                 href={s.urls[0]}

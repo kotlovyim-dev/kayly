@@ -183,7 +183,7 @@ func (d *Deployer) watchDisk(ctx context.Context) {
 	case pct >= diskAlert && !d.watch.disk:
 		d.watch.disk = true
 		d.alert(ctx, "✗ the server's disk is %d%% full (%s of %s). Old images, build cache and backups are the usual cause.",
-			pct, humanBytes(used), humanBytes(total))
+			pct, HumanBytes(used), HumanBytes(total))
 	case pct < diskClear && d.watch.disk:
 		d.watch.disk = false
 		d.alert(ctx, "✓ the server's disk is down to %d%%", pct)
@@ -200,7 +200,8 @@ func statfsUsage(path string) (used, total uint64, err error) {
 	return total - s.Bfree*uint64(s.Bsize), total, nil
 }
 
-func humanBytes(n uint64) string {
+// HumanBytes writes a size the way people read it: 1.5 GiB.
+func HumanBytes(n uint64) string {
 	const unit = 1024
 	if n < unit {
 		return fmt.Sprintf("%d B", n)

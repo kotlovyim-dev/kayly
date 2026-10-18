@@ -633,16 +633,27 @@ func (d *Deployer) hasAddon(ctx context.Context, p store.Project, kind string) b
 	return err == nil && slices.ContainsFunc(addons, func(a store.Addon) bool { return a.Kind == kind })
 }
 
-// ServiceView is a service of the live release and where it is reachable.
+// ServiceView is a service of the live release: where it is reachable and how it is doing.
 type ServiceView struct {
 	Name    string   `json:"name"`
 	Port    int      `json:"port,omitempty"`
 	Command string   `json:"command,omitempty"`
 	URLs    []string `json:"urls"`
+	// State is running, restarting, exited or missing (the reconciler is about to recreate it).
+	State string `json:"state"`
+	// Restarts is how often Docker has restarted the container after a crash.
+	Restarts  int    `json:"restarts"`
+	StartedAt string `json:"started_at,omitempty"`
+	// MemoryLimit and CPUs are the caps from kayly.toml; zero means unlimited.
+	MemoryLimit uint64  `json:"memory_limit,omitempty"`
+	CPUs        float64 `json:"cpus,omitempty"`
+	// Stats is set only when asked for, and only for a running container.
+	Stats *Stats `json:"stats,omitempty"`
 }
 
-// Services lists the services of the live release, by name.
-func (d *Deployer) Services(ctx context.Context, project string) ([]ServiceView, error) {
+// Services lists the services of the live release, by name. With stats it also samples the
+// CPU and memory of the running ones, which takes about a second (done in parallel).
+func (d *Deployer) Services(ctx context.Context, project string, stats bool) ([]ServiceView, error) {
 	p, err := d.store.Project(ctx, project)
 	if err != nil {
 		return nil, err
@@ -665,15 +676,50 @@ func (d *Deployer) Services(ctx context.Context, project string) ([]ServiceView,
 	}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Services)) {
 		s := cfg.Services[name]
-		v := ServiceView{Name: name, Port: s.Port, Command: s.Command, URLs: []string{}}
+		v := ServiceView{
+			Name: name, Port: s.Port, Command: s.Command, URLs: []string{}, State: "missing",
+			MemoryLimit: uint64(s.Memory), CPUs: s.CPUs,
+		}
 		if s.Port != 0 {
 			for _, h := range d.hosts(project, name, domains) {
 				v.URLs = append(v.URLs, "https://"+h)
 			}
 		}
+		if c, err := d.rt.Inspect(ctx, ContainerName(project, name, rel.Seq)); err == nil {
+			v.State, v.Restarts = containerState(c), c.RestartCount
+			if !c.StartedAt.IsZero() {
+				v.StartedAt = c.StartedAt.UTC().Format(time.RFC3339)
+			}
+		}
 		out = append(out, v)
 	}
+	if stats {
+		sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		var wg sync.WaitGroup
+		for i := range out {
+			if out[i].State != "running" {
+				continue
+			}
+			wg.Go(func() {
+				if st, err := d.rt.Stats(sctx, ContainerName(project, out[i].Name, rel.Seq)); err == nil {
+					out[i].Stats = &st
+				}
+			})
+		}
+		wg.Wait()
+	}
 	return out, nil
+}
+
+func containerState(c Container) string {
+	switch {
+	case c.Restarting:
+		return "restarting"
+	case c.Running:
+		return "running"
+	}
+	return "exited"
 }
 
 // CanRollBack reports whether rel can become live again: it was live once and its image is

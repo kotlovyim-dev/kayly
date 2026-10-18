@@ -8,7 +8,9 @@ Deploy web apps, APIs, workers and Telegram bots to a server you own, with one c
 - **Secrets per service.** A variable reaches only the services you list; generated secrets are created for you.
 - **Small.** One Go binary and Caddy: about 40 MB of RAM for the whole control plane.
 
-> **Status: v0.1 in progress.** Deploys, rollbacks, crash recovery, env, domains, one-click Postgres and Redis with backups, the CLI and the web UI work end to end, and Kayly runs its first two production apps. Next, on the way to 1.0: off-site backups and alerts, git-triggered deploys and an MCP server, Telegram bots ([roadmap](ARCHITECTURE.md#12-milestones)).
+- **You hear about trouble, and a lost server loses no data.** Failed deploys, failed backups, restart loops and a filling disk reach your Telegram or webhook. Postgres, Redis and volumes are backed up, encrypted, to your own S3 bucket and restored from it, and a weekly drill proves the restore works.
+
+> **Status: v0.2.** Deploys, rollbacks, crash recovery, env, domains, one-click Postgres and Redis, the CLI and the web UI work end to end, and Kayly runs its first two production apps. Backups (local and off-site, with restore and a weekly drill), notifications, per-release deploy logs, service status and resource limits are in. Next, on the way to 1.0: git-triggered deploys and an MCP server, Telegram bots ([roadmap](ARCHITECTURE.md#12-milestones)).
 
 ## Install
 
@@ -49,9 +51,23 @@ kayly deploy                         # build with your Dockerfile, or with Railp
 kayly env set API_KEY=...            # Kayly says which values are missing
 kayly domains add app.example.com web
 kayly logs web -f
-kayly releases
+kayly releases                       # with the git commit of each; `kayly releases log r12` has its output
 kayly rollback r12
+kayly status                         # server disk and memory; state, restarts, CPU and memory per service
 ```
+
+Limits per service, so one runaway process cannot starve the rest: `memory = "512m"` and `cpus = 1.5` under `[services.<name>]`.
+
+## Alerts and backups
+
+```sh
+echo "$BOT_TOKEN" | kayly notify telegram <chat-id>    # or: kayly notify webhook <url>
+kayly addons add postgres                              # backed up daily and before every release step
+echo "$SECRET_KEY" | kayly backups setup <endpoint> <bucket> <access-key>   # prints the recovery key once
+kayly backups restore latest -remote                   # also: -from <project>, to rehearse in another project
+```
+
+On a new server after a loss: `kayly restore -endpoint … -recovery-key …` brings back Kayly's database and key and the newest backups; see [ARCHITECTURE.md §8](ARCHITECTURE.md#8-add-ons-and-backups).
 
 Every service with a port is served at `https://<service>.<project>.<ip>.sslip.io` before you set up any DNS.
 

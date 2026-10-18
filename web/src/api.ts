@@ -15,11 +15,38 @@ export type Release = {
   status: ReleaseStatus;
   error?: string;
   created_at: string;
+  /** The git commit it was built from, when the CLI knew it; "-dirty" marks uncommitted changes. */
+  commit?: string;
+  commit_message?: string;
   /** A previous release whose image is still kept. */
   can_roll_back?: boolean;
 };
 
-export type Service = { name: string; port?: number; command?: string; urls: string[] };
+export type ServiceStats = { cpu_percent: number; memory_bytes: number; memory_limit: number };
+
+export type Service = {
+  name: string;
+  port?: number;
+  command?: string;
+  urls: string[];
+  state: 'running' | 'restarting' | 'exited' | 'missing';
+  restarts: number;
+  started_at?: string;
+  /** The caps from kayly.toml; absent means unlimited. */
+  memory_limit?: number;
+  cpus?: number;
+  /** Only from the services endpoint, and only while running. */
+  stats?: ServiceStats;
+};
+
+export type ServerStatus = {
+  version: string;
+  disk_used: number;
+  disk_total: number;
+  memory_total: number;
+  memory_available: number;
+  docker_version?: string;
+};
 
 export type AddonKind = 'postgres' | 'redis';
 
@@ -94,6 +121,12 @@ export const api = {
   projects: () => json<Project[]>('GET', '/projects'),
   createProject: (name: string) => json<Project>('POST', '/projects', { name }),
   project: (name: string) => json<ProjectDetail>('GET', p(name)),
+  /** The live release's services with CPU and memory; takes about a second. */
+  services: (name: string) => json<Service[]>('GET', `${p(name)}/services`),
+  server: () => json<ServerStatus>('GET', '/server'),
+  async releaseLog(name: string, seq: number): Promise<string> {
+    return (await request('GET', `${p(name)}/releases/${seq}/log`)).text();
+  },
 
   setEnv: (name: string, key: string, value: string) =>
     json<void>('PUT', `${p(name)}/env/${encodeURIComponent(key)}`, { value }),

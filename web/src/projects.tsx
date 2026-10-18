@@ -1,8 +1,8 @@
-import { type SubmitEvent, useState } from 'react';
+import { type SubmitEvent, useEffect, useState } from 'react';
 import { type Navigate, projectPath } from './App';
-import { api, type Project } from './api';
+import { api, type Project, type ServerStatus } from './api';
 import { modKey } from './palette';
-import { Button, Command, Kbd, Lamp, Pane, When } from './ui';
+import { Button, Command, formatBytes, Kbd, Lamp, Pane, When } from './ui';
 
 export function ProjectsPage({
   projects,
@@ -28,6 +28,7 @@ export function ProjectsPage({
           </h1>
           <CreateProject navigate={navigate} onCreated={onCreated} />
         </div>
+        <ServerLine />
       </section>
       <main className="min-h-0 flex-1 p-3 sm:p-5">
         {projects === null ? (
@@ -142,5 +143,43 @@ function FirstRun() {
         </div>
       </Pane>
     </div>
+  );
+}
+
+/** The server's disk and memory under the page title; amber from 85 % of the disk. */
+function ServerLine() {
+  const [s, setS] = useState<ServerStatus | null>(null);
+  useEffect(() => {
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      try {
+        const next = await api.server();
+        if (!stop) setS(next);
+      } catch {
+        // the page works without it
+      }
+      if (!stop) timer = setTimeout(tick, 60_000);
+    };
+    void tick();
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, []);
+  if (!s || s.disk_total === 0) return null;
+  const pct = Math.round((s.disk_used / s.disk_total) * 100);
+  return (
+    <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-display-ink-2">
+      <span className={pct >= 85 ? 'font-semibold text-busy' : ''}>
+        Disk {formatBytes(s.disk_used)} of {formatBytes(s.disk_total)} ({pct}%)
+      </span>
+      {s.memory_total > 0 && (
+        <span>
+          Memory {formatBytes(s.memory_total - s.memory_available)} of {formatBytes(s.memory_total)}
+        </span>
+      )}
+      <span>Kayly {s.version}</span>
+    </p>
   );
 }

@@ -32,6 +32,7 @@ type fakeRuntime struct {
 	volumes    map[string]bool
 	removed    []string // every container name passed to Remove, in order
 	execs      []execRecord
+	stats      map[string]Stats
 
 	// Failure injection, keyed by container name (or image for builds).
 	crashOnStart map[string]bool // starts, then is found exited with code 1
@@ -56,6 +57,7 @@ func newFakeRuntime() *fakeRuntime {
 		containers: map[string]*fakeContainer{}, images: map[string]bool{},
 		networks: map[string]bool{}, volumes: map[string]bool{},
 		crashOnStart: map[string]bool{}, exitCode: map[string]int{}, unhealthy: map[string]bool{},
+		stats: map[string]Stats{},
 	}
 }
 
@@ -184,6 +186,18 @@ func (f *fakeRuntime) view(name string, c *fakeContainer) Container {
 	}
 	return v
 }
+
+// Stats answers with whatever the test put in stats, zero otherwise.
+func (f *fakeRuntime) Stats(_ context.Context, name string) (Stats, error) {
+	if err := f.call("Stats", name); err != nil {
+		return Stats{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stats[name], nil
+}
+
+func (f *fakeRuntime) Version(context.Context) (string, error) { return "29.1.3", nil }
 
 // setRestarts sets a container's RestartCount, as Docker would after crashes.
 func (f *fakeRuntime) setRestarts(name string, n int) {

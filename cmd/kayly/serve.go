@@ -154,6 +154,7 @@ func serve(args []string) error {
 	}
 
 	srv := api.New(st, d, p.builds(), log)
+	srv.Version = version
 	srv.Notifier = notifier
 	srv.Offsite = uploader
 	srv.UI = web.UI()

@@ -338,3 +338,15 @@ func TestReleaseLogRoute(t *testing.T) {
 		t.Errorf("missing release: %d", code)
 	}
 }
+
+func TestServicesAndServerRoutes(t *testing.T) {
+	e := newEnv(t)
+	e.do(e.trusted, "POST", "/api/v1/projects", `{"name":"app"}`, "")
+	// A project that never deployed has no services, and that is an answer, not an error.
+	if code, out := e.do(e.trusted, "GET", "/api/v1/projects/app/services", "", ""); code != 200 || strings.TrimSpace(out) != "[]" {
+		t.Fatalf("services: %d %s", code, out)
+	}
+	if code, _ := e.do(e.trusted, "GET", "/api/v1/projects/nope/services", "", ""); code != 404 {
+		t.Fatalf("unknown project: %d", code)
+	}
+}

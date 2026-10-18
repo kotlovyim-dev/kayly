@@ -41,8 +41,22 @@ type Runtime interface {
 	// streaming stdout to w, and returns its exit code. Stderr is returned in the error when
 	// the command fails.
 	Exec(ctx context.Context, name string, cmd []string, in io.Reader, w io.Writer) (int, error)
+	// Stats samples a running container's CPU and memory. It takes about a second.
+	Stats(ctx context.Context, name string) (Stats, error)
+	// Version is the container engine's version.
+	Version(ctx context.Context) (string, error)
 	// RemoveVolume deletes a volume and its data. A missing volume is not an error.
 	RemoveVolume(ctx context.Context, name string) error
+}
+
+// Stats is a container's resource use at one moment.
+type Stats struct {
+	// CPUPercent is relative to one core: 150 means one and a half cores busy.
+	CPUPercent  float64 `json:"cpu_percent"`
+	MemoryBytes uint64  `json:"memory_bytes"`
+	// MemoryLimit is what Docker reports: the container's cap, or the host's memory without one.
+	// Use ServiceView.MemoryLimit to tell whether a cap was set.
+	MemoryLimit uint64 `json:"memory_limit"`
 }
 
 // ErrNoContainer is returned by Runtime.Inspect for a missing container.

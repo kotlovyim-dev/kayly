@@ -45,6 +45,8 @@ type Server struct {
 	Notifier *notify.Notifier
 	// Offsite uploads backups to the owner's bucket.
 	Offsite *offsite.Manager
+	// Version is Kayly's own version, shown by the server status.
+	Version string
 }
 
 // New returns a Server. workDir must exist.
@@ -59,6 +61,8 @@ func (s *Server) Handler(trusted bool) http.Handler {
 	mux.HandleFunc("GET /api/v1/projects", s.listProjects)
 	mux.HandleFunc("POST /api/v1/projects", s.createProject)
 	mux.HandleFunc("GET /api/v1/projects/{project}", s.getProject)
+	mux.HandleFunc("GET /api/v1/projects/{project}/services", s.listServices)
+	mux.HandleFunc("GET /api/v1/server", s.serverStatus)
 	mux.HandleFunc("GET /api/v1/projects/{project}/releases", s.listReleases)
 	mux.HandleFunc("GET /api/v1/projects/{project}/releases/{seq}/log", s.releaseLog)
 	mux.HandleFunc("POST /api/v1/projects/{project}/redeploy", s.redeploy)
@@ -259,7 +263,7 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 	}
 	d := ProjectDetail{ProjectView: ProjectView{Name: p.Name, CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339)}}
 	var err error
-	if d.Services, err = s.deployer.Services(ctx, p.Name); err != nil {
+	if d.Services, err = s.deployer.Services(ctx, p.Name, false); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -446,6 +450,31 @@ type ReleaseView struct {
 	CommitMessage string `json:"commit_message,omitempty"`
 	// CanRollBack is true for a previous release whose image is still kept.
 	CanRollBack bool `json:"can_roll_back,omitempty"`
+}
+
+// listServices is the live release's services with their CPU and memory, which cost a
+// second to sample and so are not part of the project view.
+func (s *Server) listServices(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.project(w, r)
+	if !ok {
+		return
+	}
+	svcs, err := s.deployer.Services(r.Context(), p.Name, true)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, svcs)
+}
+
+// ServerView is the server Kayly runs on.
+type ServerView struct {
+	Version string `json:"version"`
+	deploy.ServerStatus
+}
+
+func (s *Server) serverStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, ServerView{Version: s.Version, ServerStatus: s.deployer.Server(r.Context())})
 }
 
 func (s *Server) listReleases(w http.ResponseWriter, r *http.Request) {

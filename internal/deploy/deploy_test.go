@@ -593,3 +593,75 @@ func TestEveryReleaseKeepsItsLogAndCommit(t *testing.T) {
 		t.Error("log of a release that does not exist")
 	}
 }
+
+func TestServicesShowStateRestartsAndStatsOnRequest(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	h.mustDeploy()
+	h.rt.setRestarts("app_web_r1", 2)
+	h.rt.mu.Lock()
+	h.rt.stats["app_web_r1"] = Stats{CPUPercent: 12.5, MemoryBytes: 100 << 20, MemoryLimit: 256 << 20}
+	h.rt.mu.Unlock()
+
+	plain, err := h.d.Services(ctx, "app", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plain) != 2 || plain[0].Name != "web" || plain[0].State != "running" || plain[0].Restarts != 2 || plain[0].Stats != nil {
+		t.Fatalf("without stats: %+v", plain)
+	}
+	full, _ := h.d.Services(ctx, "app", true)
+	if full[0].Stats == nil || full[0].Stats.CPUPercent != 12.5 || full[0].Stats.MemoryLimit != 256<<20 {
+		t.Fatalf("web stats: %+v", full[0].Stats)
+	}
+	if full[0].MemoryLimit != 0 {
+		t.Errorf("web has no cap in kayly.toml, got %d", full[0].MemoryLimit)
+	}
+	if full[1].Name != "worker" || full[1].Stats == nil {
+		t.Fatalf("worker: %+v", full[1])
+	}
+
+	// A container that is gone reads as missing, and has no stats to sample.
+	h.rt.Remove(ctx, "app_worker_r1", 0)
+	again, _ := h.d.Services(ctx, "app", true)
+	if again[1].State != "missing" || again[1].Stats != nil {
+		t.Fatalf("removed worker: %+v", again[1])
+	}
+}
+
+func TestServerStatusReadsDiskAndMemory(t *testing.T) {
+	h := newHarness(t)
+	h.d.opt.DiskPath = "/data"
+	h.d.diskUsage = func(string) (uint64, uint64, error) { return 30 << 30, 100 << 30, nil }
+	s := h.d.Server(context.Background())
+	if s.DiskUsed != 30<<30 || s.DiskTotal != 100<<30 || s.DockerVersion != "29.1.3" {
+		t.Fatalf("status = %+v", s)
+	}
+	if s.MemoryTotal == 0 { // the test host is Linux; /proc/meminfo exists
+		t.Error("memory total not read")
+	}
+}
+
+func TestReadMemInfo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "meminfo")
+	os.WriteFile(path, []byte("MemTotal:        8000000 kB\nMemFree:          100000 kB\nMemAvailable:    5000000 kB\nBuffers: x\n"), 0o644)
+	total, avail := readMemInfo(path)
+	if total != 8000000<<10 || avail != 5000000<<10 {
+		t.Fatalf("total %d, available %d", total, avail)
+	}
+	if total, avail := readMemInfo(filepath.Join(t.TempDir(), "missing")); total != 0 || avail != 0 {
+		t.Fatal("a missing file should read as zero")
+	}
+}
+
+func TestServicesReportTheCapsFromTheConfig(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(app + "\n[services.limited]\nmemory = \"256m\"\ncpus = 0.5\n")
+	h.mustDeploy()
+	svcs, _ := h.d.Services(context.Background(), "app", false)
+	for _, s := range svcs {
+		if s.Name == "limited" && (s.MemoryLimit != 256<<20 || s.CPUs != 0.5) {
+			t.Errorf("limited = %+v", s)
+		}
+	}
+}

@@ -392,3 +392,49 @@ func (r *Runtime) RemoveVolume(ctx context.Context, name string) error {
 	}
 	return nil
 }
+
+// Stats samples a container's CPU and memory over one second, the way `docker stats` does.
+func (r *Runtime) Stats(ctx context.Context, name string) (deploy.Stats, error) {
+	res, err := r.c.ContainerStats(ctx, name, client.ContainerStatsOptions{IncludePreviousSample: true})
+	if err != nil {
+		return deploy.Stats{}, fmt.Errorf("docker: stats %s: %w", name, err)
+	}
+	defer res.Body.Close()
+	var st container.StatsResponse
+	if err := json.NewDecoder(res.Body).Decode(&st); err != nil {
+		return deploy.Stats{}, fmt.Errorf("docker: stats %s: %w", name, err)
+	}
+	return summarize(st), nil
+}
+
+// summarize turns a Docker sample into the numbers Kayly shows. Memory excludes the page
+// cache the kernel can take back, as `docker stats` does, so it matches what an OOM kill sees.
+func summarize(st container.StatsResponse) deploy.Stats {
+	out := deploy.Stats{MemoryLimit: st.MemoryStats.Limit}
+	cache := st.MemoryStats.Stats["inactive_file"]                // cgroup v2
+	if v, ok := st.MemoryStats.Stats["total_inactive_file"]; ok { // cgroup v1
+		cache = v
+	}
+	if st.MemoryStats.Usage > cache {
+		out.MemoryBytes = st.MemoryStats.Usage - cache
+	}
+	cpu := float64(st.CPUStats.CPUUsage.TotalUsage) - float64(st.PreCPUStats.CPUUsage.TotalUsage)
+	sys := float64(st.CPUStats.SystemUsage) - float64(st.PreCPUStats.SystemUsage)
+	if cpu > 0 && sys > 0 {
+		cores := float64(st.CPUStats.OnlineCPUs)
+		if cores == 0 {
+			cores = float64(len(st.CPUStats.CPUUsage.PercpuUsage))
+		}
+		out.CPUPercent = cpu / sys * cores * 100
+	}
+	return out
+}
+
+// Version returns the Docker Engine's version.
+func (r *Runtime) Version(ctx context.Context) (string, error) {
+	v, err := r.c.ServerVersion(ctx, client.ServerVersionOptions{})
+	if err != nil {
+		return "", fmt.Errorf("docker: version: %w", err)
+	}
+	return v.Version, nil
+}

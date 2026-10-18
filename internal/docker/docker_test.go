@@ -256,3 +256,22 @@ func TestLimitsReachTheContainer(t *testing.T) {
 		t.Fatalf("memory, swap, cpus = %s, want %s", got, want)
 	}
 }
+
+func TestStatsAndVersion(t *testing.T) {
+	r := newRuntime(t)
+	ctx := context.Background()
+	name := unique(t, "stats")
+	must(t, r.Run(ctx, deploy.Spec{Name: name, Image: testImage, Cmd: []string{"sh", "-c", "while :; do :; done"},
+		Init: true, Restart: true, MemoryBytes: 64 << 20}))
+	t.Cleanup(func() { r.Remove(ctx, name, 0) })
+	st, err := r.Stats(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.MemoryLimit != 64<<20 || st.MemoryBytes == 0 || st.CPUPercent <= 0 {
+		t.Fatalf("a busy loop in a 64 MiB container: %+v", st)
+	}
+	if v, err := r.Version(ctx); err != nil || v == "" {
+		t.Fatalf("version = %q, %v", v, err)
+	}
+}
