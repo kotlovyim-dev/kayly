@@ -49,8 +49,6 @@ Anywhere:
                                             follow a git repository; a push to its branch deploys
   kayly restart <service> [-p project]      stop and start one service of the live release
   kayly delete [-p project]                 remove a project with its containers, add-ons and volumes
-  kayly restart <service> [-p project]      stop and start one service of the live release
-  kayly delete [-p project]                 remove a project with its containers, add-ons and volumes
   kayly redeploy [-p project]               release the live image again with current env and add-ons
   kayly env ls | set KEY=value... | rm KEY... [-p project]
   kayly domains ls | add <hostname> <service> | rm <hostname> [-p project]
