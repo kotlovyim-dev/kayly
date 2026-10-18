@@ -209,3 +209,20 @@ func TestRestoreRefusesWhatItCannotRestoreInto(t *testing.T) {
 		}
 	}
 }
+
+func TestRestoreRefusesASourceThatIsNotAProjectName(t *testing.T) {
+	h := newHarness(t)
+	h.withAddons("postgres")
+	h.d.opt.Offsite = &fakeOffsite{files: map[string]map[string]string{"app": {"20260101T000000Z-daily.dump": "x"}}}
+	for _, from := range []string{"../app", "app/../../etc", "A B", "/etc"} {
+		for _, remote := range []bool{false, true} {
+			err := h.d.Restore(context.Background(), "app", "20260101T000000Z-daily.dump", RestoreSource{Project: from, Remote: remote}, io.Discard)
+			if err == nil {
+				t.Errorf("from %q (remote %v) accepted", from, remote)
+			}
+		}
+	}
+	if len(h.rt.execs) != 0 {
+		t.Errorf("a refused restore still ran %+v", h.rt.execs)
+	}
+}

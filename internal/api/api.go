@@ -372,6 +372,9 @@ func (s *Server) createBackup(w http.ResponseWriter, r *http.Request) {
 // restoreBackup replaces live data with a backup. Like every destructive call it needs the
 // project's name as confirmation, so a script cannot do it by accident.
 func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.project(w, r); !ok {
+		return
+	}
 	project := r.PathValue("project")
 	var body struct {
 		Name        string `json:"name"`
@@ -386,6 +389,8 @@ func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "confirm_required", "restoring replaces live data", "confirm with the project name: "+project)
 		return
 	}
+	// ponytail: every token reaches every project until scopes land (v0.3); then FromProject
+	// needs the same project check as {project}.
 	stream := newStream(w)
 	err := s.deployer.Restore(context.WithoutCancel(r.Context()), project, body.Name,
 		deploy.RestoreSource{Project: body.FromProject, Remote: body.Remote}, stream)

@@ -49,6 +49,11 @@ func (d *Deployer) Restore(ctx context.Context, project, name string, src Restor
 	if src.Project == "" {
 		src.Project = project
 	}
+	// The source names a directory and a bucket prefix: it must be a project name, nothing
+	// that climbs out of them.
+	if !config.ValidName(src.Project) {
+		return fmt.Errorf("%q is not a project name: %w", src.Project, store.ErrNotFound)
+	}
 	if !backupName.MatchString(name) {
 		return fmt.Errorf("%q is not a backup name: %w", name, store.ErrNotFound)
 	}
