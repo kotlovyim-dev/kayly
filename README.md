@@ -10,7 +10,7 @@ Deploy web apps, APIs, workers and Telegram bots to a server you own, with one c
 
 - **You hear about trouble, and a lost server loses no data.** Failed deploys, failed backups, restart loops and a filling disk reach your Telegram or webhook. Postgres, Redis and volumes are backed up, encrypted, to your own S3 bucket and restored from it, and a weekly drill proves the restore works.
 
-> **Status: v0.2.** Deploys, rollbacks, crash recovery, env, domains, one-click Postgres and Redis, the CLI and the web UI work end to end, and Kayly runs its first two production apps. Backups (local and off-site, with restore and a weekly drill), notifications, per-release deploy logs, service status and resource limits are in. Next, on the way to 1.0: git-triggered deploys and an MCP server, Telegram bots ([roadmap](ARCHITECTURE.md#12-milestones)).
+> **Status: v0.3.** Deploys, rollbacks, crash recovery, env, domains, one-click Postgres and Redis, the CLI and the web UI work end to end, and Kayly runs its first two production apps. Backups (local and off-site, with restore and a weekly drill), notifications, per-release deploy logs, service status and resource limits are in. Projects can follow a git repository and deploy on a GitHub push, tokens have scopes, a project binding and an expiry, every change is audited, and an MCP server lets agents deploy within their scope. Next, on the way to 1.0: Telegram bots ([roadmap](ARCHITECTURE.md#12-milestones)).
 
 ## Install
 
