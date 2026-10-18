@@ -66,6 +66,31 @@ type Service struct {
 	Memory ByteSize `toml:"memory"`
 	// CPUs caps the service's CPU time in cores, e.g. 1.5. Zero means unlimited.
 	CPUs float64 `toml:"cpus"`
+	// Telegram makes the service a Telegram bot (ARCHITECTURE.md §6).
+	Telegram *Telegram `toml:"telegram"`
+}
+
+// WebhookSecretKey is the env key Kayly generates for webhook bots and delivers to them; a
+// bot checks it against the X-Telegram-Bot-Api-Secret-Token header.
+const WebhookSecretKey = "TELEGRAM_WEBHOOK_SECRET"
+
+// Telegram configures a service as a Telegram bot.
+type Telegram struct {
+	// Token is the [env] key that holds the bot token. It must reach the service.
+	Token string `toml:"token"`
+	// Mode is "webhook" (Telegram posts updates to Path) or "polling" (the bot asks for them).
+	Mode string `toml:"mode"`
+	// Path is where a webhook bot takes updates, e.g. "/telegram".
+	Path string `toml:"path"`
+	// MenuButton opens a Mini App from the chat. Nil leaves the bot's menu button alone.
+	MenuButton *MenuButton `toml:"menu_button"`
+}
+
+// MenuButton is a web_app menu button.
+type MenuButton struct {
+	Text string `toml:"text"`
+	// URL may use ${<service>.url}.
+	URL string `toml:"url"`
 }
 
 // ByteSize is an amount of memory written as a number and a unit: "256m", "1.5g", "2048k".
@@ -89,7 +114,12 @@ func (b *ByteSize) UnmarshalText(text []byte) error {
 }
 
 // Overlaps reports whether old and new containers may run at the same time.
-func (s Service) Overlaps() bool { return len(s.Ports) == 0 && (s.Overlap == nil || *s.Overlap) }
+// Two polling bots with one token get 409 Conflict, so a polling bot never overlaps either.
+func (s Service) Overlaps() bool {
+	return len(s.Ports) == 0 && !s.polls() && (s.Overlap == nil || *s.Overlap)
+}
+
+func (s Service) polls() bool { return s.Telegram != nil && s.Telegram.Mode == "polling" }
 
 // HostPort is a port published on every host interface, e.g. "7882/udp".
 type HostPort struct {
@@ -171,6 +201,12 @@ func Parse(b []byte) (*Config, error) {
 	}
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", FileName, err)
+	}
+	if bots := c.webhookBots(); len(bots) > 0 {
+		if c.Env == nil {
+			c.Env = map[string]EnvVar{}
+		}
+		c.Env[WebhookSecretKey] = EnvVar{Generate: "hex:32", To: bots}
 	}
 	return &c, nil
 }
@@ -255,6 +291,12 @@ func (c *Config) validate() error {
 			}
 			published[p] = true
 		}
+		if s.Telegram != nil {
+			c.checkTelegram(name, s, fail)
+		}
+	}
+	if _, ok := c.Env[WebhookSecretKey]; ok && len(c.webhookBots()) > 0 {
+		fail("env.%s: Kayly generates it for webhook bots; remove the line", WebhookSecretKey)
 	}
 	for _, key := range slices.Sorted(maps.Keys(c.Env)) {
 		e := c.Env[key]
@@ -299,4 +341,56 @@ func (c *Config) checkTargets(where string, targets []string, fail func(string, 
 			fail("%s: %q is not a service or %q", where, t, ReleaseTarget)
 		}
 	}
+}
+
+func (c *Config) checkTelegram(name string, s Service, fail func(string, ...any)) {
+	t, where := s.Telegram, "services."+name+".telegram"
+	if e, ok := c.Env[t.Token]; !ok {
+		fail("%s.token: name the [env] key that holds the bot token", where)
+	} else if e.To != nil && !slices.Contains(e.To, name) {
+		fail("%s.token: env.%s does not reach %s; add it to its `to`", where, t.Token, name)
+	}
+	switch t.Mode {
+	case "webhook":
+		if s.Port == 0 {
+			fail("%s: a webhook bot needs a port", where)
+		}
+		if !strings.HasPrefix(t.Path, "/") {
+			fail("%s.path: a webhook bot needs a path starting with /, e.g. \"/telegram\"", where)
+		}
+	case "polling":
+		if t.Path != "" {
+			fail("%s.path: only webhook bots take a path", where)
+		}
+		if s.Overlap != nil && *s.Overlap {
+			fail("%s: a polling bot cannot overlap: two getUpdates clients conflict", where)
+		}
+	default:
+		fail("%s.mode: want \"webhook\" or \"polling\"", where)
+	}
+	if m := t.MenuButton; m != nil {
+		if m.Text == "" {
+			fail("%s.menu_button.text is empty", where)
+		}
+		if !strings.HasPrefix(m.URL, "https://") && !strings.HasPrefix(m.URL, "${") {
+			fail("%s.menu_button.url: a Mini App needs an https:// URL", where)
+		}
+		for _, ref := range refs(m.URL) {
+			svc, field, _ := strings.Cut(ref, ".")
+			if target, ok := c.Services[svc]; !ok || field != "url" || target.Port == 0 {
+				fail("%s.menu_button.url: ${%s}: only ${<service>.url} of a service with a port", where, ref)
+			}
+		}
+	}
+}
+
+// webhookBots returns the services that take Telegram updates by webhook, sorted.
+func (c *Config) webhookBots() []string {
+	var out []string
+	for _, name := range slices.Sorted(maps.Keys(c.Services)) {
+		if t := c.Services[name].Telegram; t != nil && t.Mode == "webhook" {
+			out = append(out, name)
+		}
+	}
+	return out
 }

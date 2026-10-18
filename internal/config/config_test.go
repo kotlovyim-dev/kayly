@@ -54,6 +54,57 @@ func TestParseLeryo(t *testing.T) {
 	}
 }
 
+const tok = "BOT_TOKEN = {}"
+
+// bot is a config with a bot service on port 8080 whose telegram table holds tg, and [env] env.
+func bot(tg, env string) string {
+	return "[services.bot]\nport = 8080\n[services.bot.telegram]\ntoken = \"BOT_TOKEN\"\n" + tg + "\n[env]\n" + env + "\n"
+}
+
+func TestTelegram(t *testing.T) {
+	c, err := Parse([]byte(`
+[services.web]
+port = 3000
+
+[services.bot]
+port = 8080
+
+[services.bot.telegram]
+token = "BOT_TOKEN"
+mode = "webhook"
+path = "/telegram"
+menu_button = { text = "Open", url = "${web.url}" }
+
+[services.poller]
+[services.poller.telegram]
+token = "BOT_TOKEN"
+mode = "polling"
+
+[env]
+BOT_TOKEN = { to = ["bot", "poller"] }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tg := c.Services["bot"].Telegram; tg.Path != "/telegram" || tg.MenuButton.URL != "${web.url}" {
+		t.Errorf("bot telegram = %+v", tg)
+	}
+	if !c.Services["bot"].Overlaps() || c.Services["poller"].Overlaps() {
+		t.Error("a webhook bot overlaps, a polling bot does not")
+	}
+	// Kayly generates the webhook secret, for the webhook bots only.
+	env, _, err := c.ResolveEnv(map[string]string{"BOT_TOKEN": "1:x", WebhookSecretKey: "s"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["bot"][WebhookSecretKey] != "s" || env["poller"][WebhookSecretKey] != "" || env["web"][WebhookSecretKey] != "" {
+		t.Errorf("webhook secret reached %v", env)
+	}
+	if g := c.Env[WebhookSecretKey].Generate; g != "hex:32" {
+		t.Errorf("webhook secret generate = %q", g)
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	const svc = "[services.web]\nport = 80\n"
 	tests := []struct{ name, toml, want string }{
@@ -93,6 +144,18 @@ func TestParseErrors(t *testing.T) {
 		{"port twice", "[services.a]\nports = [\"3478/udp\"]\n[services.b]\nports = [\"3478/udp\"]\n", "published twice"},
 		{"ports and overlap", "[services.rtc]\nports = [\"7881/tcp\"]\noverlap = true\n", "cannot overlap"},
 		{"unterminated quote", "[services.web]\ncommand = \"sh -c 'x\"\n", "services.web.command"},
+		{"bot token undeclared", bot("mode = \"polling\"", ""), "name the [env] key"},
+		{"bot token scoped away", bot("mode = \"polling\"", "BOT_TOKEN = { to = [\"web\"] }"), "does not reach bot"},
+		{"bot mode", bot("mode = \"push\"", tok), "want \"webhook\" or \"polling\""},
+		{"webhook without port", "[services.bot]\n[services.bot.telegram]\ntoken = \"BOT_TOKEN\"\nmode = \"webhook\"\npath = \"/t\"\n[env]\n" + tok + "\n", "needs a port"},
+		{"webhook without path", bot("mode = \"webhook\"", tok), "needs a path"},
+		{"polling with path", bot("mode = \"polling\"\npath = \"/t\"", tok), "only webhook bots"},
+		{"polling overlap", strings.Replace(bot("mode = \"polling\"", tok), "port = 8080", "overlap = true", 1), "cannot overlap"},
+		{"menu text", bot("mode = \"polling\"\nmenu_button = { url = \"https://x\" }", tok), "menu_button.text is empty"},
+		{"menu http", bot("mode = \"polling\"\nmenu_button = { text = \"Open\", url = \"http://x\" }", tok), "https://"},
+		{"menu env ref", bot("mode = \"polling\"\nmenu_button = { text = \"Open\", url = \"${BOT_TOKEN}\" }", tok), "only ${<service>.url}"},
+		{"menu worker url", bot("mode = \"polling\"\nmenu_button = { text = \"Open\", url = \"${worker.url}\" }", tok) + "[services.worker]\n", "only ${<service>.url}"},
+		{"webhook secret declared", bot("mode = \"webhook\"\npath = \"/t\"", tok+"\nTELEGRAM_WEBHOOK_SECRET = {}"), "Kayly generates it"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
