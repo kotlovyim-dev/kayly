@@ -95,6 +95,12 @@ func (r *Runtime) Run(ctx context.Context, s deploy.Spec) error {
 			Config: map[string]string{"max-size": "10m", "max-file": "5"},
 		},
 	}
+	if s.MemoryBytes > 0 {
+		host.Memory, host.MemorySwap = s.MemoryBytes, s.MemoryBytes // equal: no swap
+	}
+	if s.CPUs > 0 {
+		host.NanoCPUs = int64(s.CPUs * 1e9)
+	}
 	if s.ReadOnly {
 		host.Tmpfs = map[string]string{"/tmp": ""}
 	}

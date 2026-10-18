@@ -522,3 +522,19 @@ func TestHostPortsReplaceInsteadOfOverlap(t *testing.T) {
 	}
 	h.assertLive(2)
 }
+
+func TestLimitsAreAppliedToServiceContainers(t *testing.T) {
+	h := newHarness(t)
+	h.writeConfig(app + "\n[services.limited]\nmemory = \"256m\"\ncpus = 0.5\n")
+	h.mustDeploy()
+	h.rt.mu.Lock()
+	spec := h.rt.containers["app_limited_r1"].spec
+	web := h.rt.containers["app_web_r1"].spec
+	h.rt.mu.Unlock()
+	if spec.MemoryBytes != 256<<20 || spec.CPUs != 0.5 {
+		t.Errorf("limited = %d bytes, %v cpus", spec.MemoryBytes, spec.CPUs)
+	}
+	if web.MemoryBytes != 0 || web.CPUs != 0 {
+		t.Errorf("a service without limits got %d bytes, %v cpus", web.MemoryBytes, web.CPUs)
+	}
+}

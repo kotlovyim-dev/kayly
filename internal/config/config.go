@@ -62,6 +62,30 @@ type Service struct {
 	// carry (media, TURN, game servers). A service with ports never overlaps: two containers
 	// cannot bind one host port.
 	Ports []HostPort `toml:"ports"`
+	// Memory caps the service's RAM, e.g. "512m"; swap is off. Empty means unlimited.
+	Memory ByteSize `toml:"memory"`
+	// CPUs caps the service's CPU time in cores, e.g. 1.5. Zero means unlimited.
+	CPUs float64 `toml:"cpus"`
+}
+
+// ByteSize is an amount of memory written as a number and a unit: "256m", "1.5g", "2048k".
+type ByteSize int64
+
+var sizeRe = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)([kmg])$`)
+
+// UnmarshalText parses "<number><k|m|g>" (powers of 1024). Docker refuses less than 6 MiB.
+func (b *ByteSize) UnmarshalText(text []byte) error {
+	m := sizeRe.FindStringSubmatch(strings.ToLower(string(text)))
+	if m == nil {
+		return fmt.Errorf("size %q: want a number and k, m or g, e.g. 512m", text)
+	}
+	n, _ := strconv.ParseFloat(m[1], 64)
+	n *= float64(int64(1) << (10 * (1 + strings.Index("kmg", m[2]))))
+	if n < 6<<20 || n > 1<<50 {
+		return fmt.Errorf("size %q: must be between 6m and 1048576g", text)
+	}
+	*b = ByteSize(n)
+	return nil
 }
 
 // Overlaps reports whether old and new containers may run at the same time.
@@ -212,6 +236,12 @@ func (c *Config) validate() error {
 				fail("services.%s.volumes: %s mounted twice", name, v.Path)
 			}
 			seen[v.Path] = true
+		}
+		if s.Memory != 0 && s.Memory < 6<<20 { // a bare TOML number skips UnmarshalText
+			fail("services.%s.memory: write it as a string with a unit, e.g. \"512m\"", name)
+		}
+		if s.CPUs < 0 || s.CPUs > 1024 {
+			fail("services.%s.cpus: %v is out of range; use a number of cores such as 0.5 or 2", name, s.CPUs)
 		}
 		if len(s.Ports) > 0 && s.Overlap != nil && *s.Overlap {
 			fail("services.%s.overlap: a service with host ports cannot overlap", name)

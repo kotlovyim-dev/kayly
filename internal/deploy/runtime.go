@@ -92,6 +92,10 @@ type Spec struct {
 	// a process such as node, which does not handle SIGTERM as PID 1, is only stopped by
 	// SIGKILL at the end of the grace period.
 	Init bool
+	// MemoryBytes caps RAM (swap is off with it); zero is unlimited.
+	MemoryBytes int64
+	// CPUs caps CPU time in cores; zero is unlimited.
+	CPUs float64
 	// CapAdd adds capabilities back after all are dropped.
 	CapAdd []string
 	// Ports are published on the host. Only infrastructure (the proxy) publishes ports;

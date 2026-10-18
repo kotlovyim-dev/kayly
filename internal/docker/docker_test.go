@@ -240,3 +240,19 @@ func TestExecFeedsStdinAndReportsFailure(t *testing.T) {
 		t.Fatalf("failure: code %d, err %v", code, err)
 	}
 }
+
+func TestLimitsReachTheContainer(t *testing.T) {
+	r := newRuntime(t)
+	ctx := context.Background()
+	name := unique(t, "limits")
+	must(t, r.Run(ctx, deploy.Spec{Name: name, Image: testImage, Cmd: []string{"sleep", "60"}, Init: true, Restart: true,
+		MemoryBytes: 64 << 20, CPUs: 0.5}))
+	t.Cleanup(func() { r.Remove(ctx, name, 0) })
+	out, err := exec.Command("docker", "inspect", "--format", "{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}} {{.HostConfig.NanoCpus}}", name).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(string(out)), "67108864 67108864 500000000"; got != want {
+		t.Fatalf("memory, swap, cpus = %s, want %s", got, want)
+	}
+}

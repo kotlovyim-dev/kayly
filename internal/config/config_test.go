@@ -238,3 +238,24 @@ func TestHostPorts(t *testing.T) {
 		t.Error("a service with host ports must not overlap")
 	}
 }
+
+func TestLimits(t *testing.T) {
+	c, err := Parse([]byte("[services.web]\nmemory = \"512m\"\ncpus = 1.5\n[services.worker]\nmemory = \"1.5G\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Services["web"]; got.Memory != 512<<20 || got.CPUs != 1.5 {
+		t.Errorf("web = %+v", got)
+	}
+	if got := c.Services["worker"].Memory; got != 1536<<20 {
+		t.Errorf("worker memory = %d, want 1.5 GiB", got)
+	}
+	for _, bad := range []string{
+		"memory = \"512\"", "memory = \"5m\"", "memory = \"-1g\"", "memory = \"lots\"", "memory = 512",
+		"cpus = -1", "cpus = 5000",
+	} {
+		if _, err := Parse([]byte("[services.web]\n" + bad + "\n")); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+}

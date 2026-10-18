@@ -414,6 +414,9 @@ func (d *Deployer) serviceSpecs(project string, rel store.Release, cfg *config.C
 			ReadOnly: s.ReadOnly,
 			Restart:  true,
 			Init:     true,
+
+			MemoryBytes: int64(s.Memory),
+			CPUs:        s.CPUs,
 		}
 		if s.Command != "" {
 			spec.Cmd, _ = shellquote.Split(s.Command) // config.Parse rejects commands that do not split
