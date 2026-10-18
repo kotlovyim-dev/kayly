@@ -203,7 +203,7 @@ The script installs Docker (if missing), downloads one binary, creates a systemd
 
 ## 7. Config: `kayly.toml`
 
-The file is described in [ARCHITECTURE.md §5](ARCHITECTURE.md), with the full leryo example. A bot would look like this (v0.2):
+The file is described in [ARCHITECTURE.md §5](ARCHITECTURE.md), with the full leryo example. A bot would look like this (the decided syntax is in ARCHITECTURE.md §6):
 
 ```toml
 [services.bot]

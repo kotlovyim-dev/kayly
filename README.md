@@ -8,7 +8,7 @@ Deploy web apps, APIs, workers and Telegram bots to a server you own, with one c
 - **Secrets per service.** A variable reaches only the services you list; generated secrets are created for you.
 - **Small.** One Go binary and Caddy: about 40 MB of RAM for the whole control plane.
 
-> **Status: v0.1 in progress.** Deploys, rollbacks, crash recovery, env, domains, one-click Postgres and Redis with backups, the CLI and the web UI work end to end, and Kayly runs its first two production apps. Next: GitHub-triggered deploys, raw TCP/UDP ports (for LiveKit), Telegram bots.
+> **Status: v0.1 in progress.** Deploys, rollbacks, crash recovery, env, domains, one-click Postgres and Redis with backups, the CLI and the web UI work end to end, and Kayly runs its first two production apps. Next, on the way to 1.0: off-site backups and alerts, git-triggered deploys and an MCP server, Telegram bots ([roadmap](ARCHITECTURE.md#12-milestones)).
 
 ## Install
 

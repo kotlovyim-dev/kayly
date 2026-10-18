@@ -14,11 +14,13 @@ This document is the source of truth for how Kayly is built. A change that contr
 | Build | Railpack (Node, `npm run build`) | `Dockerfile`, target `app` |
 | Services | `web` (one Node process: static, `/api/*`, `/api/ws`) | `app` (:3000, health `/api/ready`), `worker` (no port) |
 | Release step | none | `node src/db/migrate.ts`, needs the admin DB URL |
-| State | Upstash Redis (external, unchanged) | Postgres 18 add-on, `uploads` volume |
+| State | Redis add-on (moved from Upstash) | Postgres 18 add-on, `uploads` volume |
 | Needs from the proxy | WebSocket, SPA rewrites, cache headers | WebSocket + SSE through compression, 300 MB bodies, 60 min requests |
 | Change in the app repo | add `server/main.ts` (serve `dist/`, mount the handlers and `ws`) and a `start` script | add `kayly.toml`; drop `docker-compose.coolify.yml` after cut-over |
 
-**v0.1 non-goals:** multiple servers, teams and roles, autoscaling, scale to zero, a service catalogue, static hosting without a container, preview deploys, GitHub App, Telegram service type (v0.2), UDP ports (LiveKit stays where it is).
+**v1.0** is Kayly that someone other than its author installs from the README and leaves running: they hear when something breaks, losing the server loses no data, upgrading Kayly stops no traffic, and `kayly.toml`, `/api/v1`, the CLI and the MCP tools follow semver. Telegram bots and Mini Apps are first-class (§6), because the positioning promises them. Milestones and exit criteria: §12.
+
+**1.0 non-goals:** multiple servers, teams and roles, autoscaling, scale to zero, a service catalogue, static hosting without a container, preview deploys, GitHub App, cron services, TCP passthrough on 443 (TURN over TLS).
 
 ## 2. Invariants
 
@@ -67,7 +69,7 @@ Runtime dependencies on the host, all installed and pinned by `install.sh`:
 SQLite (`modernc.org/sqlite`, pure Go, WAL), schema migrations embedded in the binary and applied on start.
 
 ```
-project      id, name, source (git url + branch | upload), created_at
+project      id, name, source (git url + branch | upload), deploy_key (encrypted), webhook_secret (encrypted), created_at
 release      id, project_id, seq, image, commit, config_json, env_version, status, created_at
                status: building → releasing → starting → live | failed | superseded
 service      derived from release.config_json; not a table
@@ -76,7 +78,10 @@ addon        id, project_id, kind (postgres), version, credentials (encrypted), 
 volume       project_id, name                          (docker volume kayly_<project>_<name>)
 domain       project_id, service, hostname, status
 deploy_log   release_id, path on disk                  (/var/lib/kayly/logs/<release>.log)
-token        id, hash, created_at, last_used_at        (API/CLI tokens)
+token        id, name, hash, scope (read | deploy | admin), project_id (null = every project),
+               expires_at, created_at, last_used_at    (API/CLI/MCP tokens)
+audit        id, token_id, action, project_id, detail, created_at   (every write, whichever door it came through)
+setting      key, value (encrypted)                    (server-wide: S3 target, notification targets)
 user         id, email, password_hash                  (v0.1: one owner)
 ```
 
@@ -127,6 +132,8 @@ Rules:
 - A `command` replaces the image's entrypoint and command, and runs without a shell (words are split like a shell would split them). Use `sh -c '…'` for pipes, `&&` or `$VAR` expansion. Without `command` the image runs as built.
 - Unknown keys are an error, not a warning. The parser reports file, line and the nearest valid key.
 - `ports = ["7882/udp", …]` publishes ports on the host at the same numbers, for traffic the HTTP proxy cannot carry (media, TURN). Such a service never overlaps: its old container stops before the new one starts, a short gap on deploy. 80 and 443 belong to the proxy and are refused.
+- `memory = "512m"` and `cpus = 1.5` cap a service, so one runaway process cannot starve the others on the server. Without them a service is unlimited.
+- `[services.<name>.telegram]` makes a service a Telegram bot; see §6.
 - Defaults for every service: restart `unless-stopped`, `no-new-privileges`, all capabilities dropped, log rotation 5 × 10 MB, stop grace 30 s. `read_only = true` adds a read-only root filesystem with a tmpfs on `/tmp`. Opt-outs are added when an app needs one.
 
 ## 6. Deploy pipeline
@@ -144,13 +151,34 @@ Rules:
             timeout (default 120 s) → remove new containers, release failed
 6 switch    load proxy config pointing at the new containers; commit DB transaction
 7 drain     stop old containers (SIGTERM, grace period), remove them
-8 prune     keep the last 3 images per project for instant rollback
+8 prune     keep the last 3 images per project for instant rollback; trim the build cache to 10 GB
 ```
 
 - Steps 1–5 never touch the live release (invariant 1). Step 6 is the only point of change. Step 7 runs after the switch, so a failure there leaves garbage, not an outage; the reconciler collects it.
 - **Overlap.** By default old and new containers overlap from step 4 to step 7. A service with `overlap = false` (Telegram polling bots, singletons) is stopped in step 4 *before* its successor starts; this is the only case with a gap, and it is opt-in.
 - **Rollback** = steps 4–7 with an existing release's image and env snapshot. No build, no release step (expand/contract migrations keep the old code working, as leryo's runbook already requires).
 - **Logs.** Each step streams to the release's log file and to subscribers over SSE. The build command is printed verbatim so the user can rerun it by hand.
+
+### Telegram bots and Mini Apps
+
+```toml
+[services.bot]
+command = "node bot.js"
+port = 8080
+
+[services.bot.telegram]
+token = "BOT_TOKEN"              # the [env] key that holds the token; it must reach this service
+mode = "webhook"                 # or "polling"
+path = "/telegram"               # webhook only
+menu_button = { text = "Open", url = "${web.url}" }   # optional: open a Mini App from the chat
+```
+
+- **Health (step 5)** also calls `getMe` with the new release's token. A wrong or revoked token fails the release before anything live changes.
+- **Webhook.** Needs a `port`. Kayly generates a secret once (like `generate`) and delivers it to the service as `TELEGRAM_WEBHOOK_SECRET`; the bot checks it against the `X-Telegram-Bot-Api-Secret-Token` header. After step 6, Kayly compares `getWebhookInfo` with the wanted URL (`https://<first custom domain, else the sslip.io one><path>`) and calls `setWebhook` only if they differ. The URL does not change between releases, so an ordinary deploy never touches Telegram, and updates sent during the switch reach whichever container the proxy routes to.
+- **Polling.** Implies `overlap = false`: two `getUpdates` clients get `409 Conflict`. Before the new container starts, Kayly calls `deleteWebhook` (keeping pending updates), so a bot moved from webhook to polling works at once.
+- **Menu button.** After step 6, `setChatMenuButton` with a `web_app` button, under the same compare-then-set rule. `url` takes the templates of §5.
+- A Telegram call after the switch that fails leaves the release live (as step 7 does), sends a notification (§9) and is retried by the reconciler every 30 s. Rollback applies the old release's `telegram` table under the same rules.
+- `initData` validation is the app's job (every Telegram library ships it). The docs carry a bot and a Mini App example repo; Kayly ships no templates.
 
 ### Crash recovery
 
@@ -160,6 +188,7 @@ On start, and every 30 s, the reconciler:
 2. Ensures every service of each active release has a running container; starts missing ones from the release's image.
 3. Removes containers labelled with a release that is neither active nor in a running pipeline.
 4. Pushes the proxy config generated from the DB if it differs from what Caddy reports.
+5. Re-applies the Telegram webhook and menu button of every active release whose `getWebhookInfo` differs.
 
 Because live containers are only replaced after the switch and the proxy config is regenerated from the DB, a crash at any step converges to "the last committed active release is serving".
 
@@ -173,7 +202,7 @@ Because live containers are only replaced after the switch and the proxy config 
 
 `ponytail:` every port service shares `kayly-edge`, so services of different projects can reach each other by name. Fine while one owner runs all projects; isolate per project before Kayly hosts strangers' apps.
 
-## 8. Add-ons: Postgres and Redis
+## 8. Add-ons and backups
 
 One click (UI) or `kayly addons add <kind>` attaches an add-on to a project, like a Vercel integration: Kayly starts it, generates its password and injects its URL. A project has at most one add-on of each kind.
 
@@ -185,8 +214,22 @@ One click (UI) or `kayly addons add <kind>` attaches an add-on to a project, lik
 - Add-ons live on the project network only, data in volume `kayly_<project>_<kind>`. The image is recorded per add-on, so upgrading Kayly never upgrades a database.
 - They are not part of releases: deploys wait until add-ons are healthy, the reconciler restarts a vanished one and never removes one. Removing an add-on (typed confirmation) deletes its data; backups stay.
 - Services receive a new add-on on their next deploy, or at once with `kayly redeploy` (a release of the live image with current env, no build).
-- **Backups:** `pg_dump -Fc` before every release step (a bad migration can always be undone), daily, and on demand; 14 kept per project in `/var/lib/kayly/backups/<project>`, downloadable from the UI and CLI.
-- `ponytail:` backups stay on the server's disk: they cover mistakes and bad migrations, not a lost server. Off-site copies (S3) and restore drills come next. Volumes (leryo's uploads) are not backed up yet.
+### Backups
+
+| What | How | When |
+|---|---|---|
+| Postgres add-on | `pg_dump -Fc` | before every release step (a bad migration can always be undone), daily, on demand |
+| Redis add-on | `valkey-cli --rdb` (a point-in-time snapshot) | daily, on demand |
+| Volumes | `tar` from a throwaway container that mounts the volume read-only | daily, on demand |
+| Kayly itself | `VACUUM INTO` snapshot of `kayly.db`, plus `master.key` | daily, and before `kayly upgrade` |
+
+- **Local:** 14 per project and kind in `/var/lib/kayly/backups/<project>`, downloadable from the UI and CLI. They cover mistakes and bad migrations.
+- **Off-site, for a lost server:** any S3-compatible bucket (Hetzner, R2, B2, AWS, MinIO), set once with `kayly backups setup` (endpoint, bucket, access key; the secret is read from stdin). Every backup is uploaded once it is written. Objects are encrypted on the server with XChaCha20-Poly1305 under a *recovery key* that setup generates and prints once: the owner keeps it off the server, and the bucket alone leaks nothing. Kayly applies retention itself (everything from the last 7 days, then one a week for 4 weeks), because not every provider has lifecycle rules.
+- **Restore:** `kayly backups restore <name>` puts a dump, snapshot or volume archive back into the live add-on or volume. Typed confirmation, a fresh backup first, under the project lock (invariant 7).
+- **Drill:** weekly, Kayly restores the newest off-site Postgres dump into a throwaway container. A failed drill counts as a failed backup.
+- **Lost server:** `install.sh` on a new one, then `kayly restore --from s3 --recovery-key …` brings back `kayly.db`, `master.key`, add-on data and volumes. Images are not backed up: each project is rebuilt from its live release's commit (git source), or waits for `kayly deploy` (upload source).
+- Every failed backup, upload or drill sends a notification (§9). A backup nobody hears about failing is not a backup.
+- `tar` of a live volume can catch a file mid-write. That is fine for write-once uploads; an app that rewrites files in place keeps them in Postgres instead.
 
 ## 9. API, UI, CLI, MCP
 
@@ -194,7 +237,32 @@ One click (UI) or `kayly addons add <kind>` attaches an add-on to a project, lik
 - **Auth:** v0.1 has one owner and API tokens only, stored hashed. `install.sh` prints one. The browser signs in with a token and gets it back as an HttpOnly, Secure, SameSite=Strict cookie; cookie-authenticated writes also need an `X-Kayly-Request` header.
 - **UI:** React 19 + Vite + TanStack Router/Query + Tailwind v4, built into `web/dist` and embedded with `go:embed`. Three screens: projects, new project, project (releases · logs · env · domains · settings).
 - **CLI:** `kayly login <url>`, `kayly init`, `kayly deploy` (tarball of the working tree minus `.gitignore`), `kayly logs [service]`, `kayly rollback [release]`, `kayly env set|ls|rm`, `kayly status`.
-- **MCP:** the same operations as the CLI, served by the daemon at `/mcp`, authorized with an API token.
+- **Tokens** carry a scope (`read` < `deploy` < `admin`), optionally one project and an expiry. A token used by an agent should be `deploy` and project-bound. Every write lands in `audit` with the token that made it. Sign-in is rate-limited per IP.
+- **Git source:** a project can follow a repo and branch. Kayly generates an SSH deploy key (read-only, shown once to add to the repo) and a webhook secret; a GitHub `push` webhook to `/api/v1/hooks/github/<project>` with a valid signature deploys that commit. The commit and its message are recorded on the release. `kayly deploy` from a working tree keeps working for any project.
+- **Notifications:** to a Telegram chat (a bot token and chat id) and/or a webhook URL (JSON POST). Events: deploy or rollback failed, a service restarting in a loop or failing its health check while live, a backup, upload or drill failed, disk above 85 %, a certificate that could not be issued, a Telegram call that failed. One message per event and state change, not per check.
+- **Upgrade:** `kayly upgrade [version]` downloads the release, checks its signature, takes a Kayly backup (§8), swaps the binary and restarts the unit. Apps and the proxy keep serving (invariant 4); schema migrations only move forward, so downgrading means restoring that backup.
+
+### MCP
+
+The daemon serves MCP at `/mcp` with the official Go SDK (`github.com/modelcontextprotocol/go-sdk`), over stateless Streamable HTTP. Auth is an API token as a Bearer header, with the token's scope and project limiting the tools:
+
+```sh
+claude mcp add --transport http kayly https://kayly.<host>/mcp --header "Authorization: Bearer <token>"
+```
+
+| Scope | Tools |
+|---|---|
+| `read` | `list_projects`, `get_project` (live release, service states and restarts, URLs, missing env keys, add-ons), `list_releases`, `get_release` (status, error, log tail), `get_logs` (service, tail, since, grep), `list_env` (keys and which services get them), `list_domains` (DNS and certificate state), `list_backups`, `server_status` (disk, memory, versions), `validate_config` (parses a `kayly.toml`, returns errors with line numbers) |
+| `deploy` | `deploy` (a git ref of the project's source), `redeploy`, `rollback`, `restart_service`, `set_env`, `delete_env`, `add_domain`, `remove_domain`, `create_backup` |
+| `admin` | `add_addon`, `remove_addon`, `restore_backup`, `delete_project` |
+
+- Tools call the same `deploy` functions as the HTTP handlers; MCP adds no logic of its own.
+- No tool returns an env value or a credential. `set_env` writes; nothing reads back.
+- Destructive tools carry `destructiveHint` and require `confirm` equal to the project name, the rule the UI uses.
+- `deploy`, `redeploy` and `rollback` return the release number at once; `wait` (up to 60 s) blocks for the outcome, otherwise the agent polls `get_release`.
+- Output is capped (logs at 32 KB) so a tool call cannot flood the agent's context.
+- Deploying an uncommitted working tree stays the CLI's job (`kayly deploy`), which an agent runs like any command.
+- OAuth 2.1, which hosted chat clients need for remote connectors, waits until after 1.0; Bearer tokens cover Claude Code, Cursor and Codex.
 
 ## 10. Code layout
 
@@ -227,6 +295,9 @@ Dependency direction: `api → deploy → {proxy, store, config, secret}`; `dock
 | | Delivers | Done when |
 |---|---|---|
 | **v0.1** | daemon, CLI, pipeline, rollback, reconciler, proxy, env, Postgres add-on, backups, minimal UI, `install.sh` | ten00 and leryo serve production from Kayly; leryo's deploy runbook fits on one page |
-| v0.2 | GitHub webhook auto-deploy, Telegram bot service type (webhook/polling), Mini App template | a bot and Mini App go from repo to live in under 2 minutes |
-| v0.3 | preview deploys, custom-domain on-demand TLS, MCP polish, cron services | |
-| later | second server, UDP ports, teams | |
+| v0.2: data and alerts | backups of Redis, volumes and Kayly itself; off-site S3 with recovery key, retention and weekly drill; `backups restore`; notifications (Telegram, webhook); deploy logs and commit kept per release; service state, restarts, CPU/RAM and disk in UI and API; `memory`/`cpus` limits; build cache trimming | a failed backup reaches the owner's Telegram; leryo's DB and uploads restore from S3 into a throwaway project |
+| v0.3: git and agents | git source with deploy key and GitHub webhook; project delete, service restart; token scopes, project binding, expiry; audit log; MCP (§9) | a push to leryo's `main` goes live with no command; an agent with a `deploy` token deploys, reads logs and rolls back over MCP, and is refused `remove_addon` |
+| v0.4: Telegram | `[services.<name>.telegram]`: webhook, polling, `getMe` health, menu button; bot and Mini App example repos | a bot and a Mini App go from repo to live in under 2 minutes, in both modes |
+| v0.5: ready for strangers | `kayly upgrade`; sign-in rate limit; signed releases checked by `install.sh` and `upgrade`; CI end-to-end deploy with real Docker, crash of the real daemon at each step, upgrade from the previous release under load; reference for `kayly.toml`, CLI, API and MCP; user docs (install, deploy, domains, backups, bots, troubleshooting, security model); CHANGELOG | every 1.0 exit criterion below is met once, on a fresh VPS |
+| **v1.0** | the contracts above frozen under semver | ten00 and leryo run 30 days with no manual fix on the server; leryo is restored from S3 onto a clean VPS; v0.5 upgrades to v1.0 with zero failed requests; a fresh VPS reaches a live URL in under 5 minutes with only the README |
+| after 1.0 | cron services, preview deploys, OAuth for MCP, TCP passthrough on 443, second server, teams | |

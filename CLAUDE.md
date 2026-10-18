@@ -2,7 +2,7 @@
 
 Self-hosted deploy platform: Vercel-style UX for web apps, APIs, workers and Telegram bots on a server you own. Open source from the first commit.
 
-**Current goal:** v0.1, a stable, convenient home for two real apps, `../ten.00` and `../leryo`. Build only what one of them needs ([ARCHITECTURE.md §1](ARCHITECTURE.md)).
+**Current goal:** v1.0, Kayly that someone other than its author can install and leave running ([ARCHITECTURE.md §1, §12](ARCHITECTURE.md)). Build the current milestone's items and nothing beyond them; `../ten.00` and `../leryo` stay the proving ground for each one.
 
 ## Working with the owner
 
