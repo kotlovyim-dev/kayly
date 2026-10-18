@@ -59,7 +59,9 @@ var addonKinds = map[string]addonKind{
 				Cmd:            []string{"valkey-server", "--appendonly", "yes", "--requirepass", a.Password},
 				KeepEntrypoint: true, // it fixes /data ownership and drops to the valkey user
 				Health:         []string{"CMD-SHELL", "valkey-cli --no-auth-warning -a " + a.Password + " ping | grep -q PONG"},
-				CapAdd:         []string{"CHOWN", "SETGID", "SETUID"},
+				// DAC_OVERRIDE: the ownership pass reads files the valkey user owns (0700), which
+				// only matters once data exists, i.e. when the container is recreated.
+				CapAdd: []string{"CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"},
 			}
 		},
 	},

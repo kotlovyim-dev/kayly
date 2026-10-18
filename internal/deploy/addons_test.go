@@ -369,3 +369,15 @@ func TestKaylySnapshotCarriesDatabaseAndKey(t *testing.T) {
 		t.Fatalf("a fresh snapshot was repeated: %d", len(all))
 	}
 }
+
+// The entrypoints of both add-ons start as root and walk a data directory owned by their
+// own user. On a fresh volume that works with fewer capabilities; once data exists (a
+// recreated container) it needs DAC_OVERRIDE to read the 0700 directories.
+func TestAddonsCanReadTheirOwnDataWhenRecreated(t *testing.T) {
+	for kind := range addonKinds {
+		spec := addonSpec("app", store.Addon{Kind: kind, Image: "img", Password: "pw"})
+		if !slices.Contains(spec.CapAdd, "DAC_OVERRIDE") {
+			t.Errorf("%s add-on lacks DAC_OVERRIDE: %v", kind, spec.CapAdd)
+		}
+	}
+}
