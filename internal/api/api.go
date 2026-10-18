@@ -461,8 +461,10 @@ func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "confirm_required", "restoring replaces live data", "confirm with the project name: "+project)
 		return
 	}
-	// ponytail: every token reaches every project until scopes land (v0.3); then FromProject
-	// needs the same project check as {project}.
+	if tok, _ := r.Context().Value(tokenKey{}).(store.Token); tok.Project != "" && body.FromProject != "" && body.FromProject != tok.Project {
+		writeError(w, http.StatusForbidden, "forbidden", "this token is limited to project "+tok.Project, "")
+		return
+	}
 	stream := newStream(w)
 	err := s.deployer.Restore(context.WithoutCancel(r.Context()), project, body.Name,
 		deploy.RestoreSource{Project: body.FromProject, Remote: body.Remote}, stream)

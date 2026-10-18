@@ -367,6 +367,12 @@ func TestTokenScopeAndProject(t *testing.T) {
 		return tv.Token
 	}
 	reader := mint(`{"name":"reader","scope":"read"}`)
+	boundAdmin := mint(`{"name":"boss","scope":"admin","project":"app"}`)
+	// A bound token cannot restore another project's backup into its own.
+	if code, out := e.do(e.public, "POST", "/api/v1/projects/app/backups/restore",
+		`{"name":"latest","from_project":"other","confirm":"app"}`, boundAdmin); code != 403 {
+		t.Errorf("restore from another project = %d %s", code, out)
+	}
 	agent := mint(`{"name":"agent","scope":"deploy","project":"app","expires_days":7}`)
 
 	for _, c := range []struct {
