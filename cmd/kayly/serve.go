@@ -21,6 +21,7 @@ import (
 	"github.com/kotlovyim-dev/kayly/internal/config"
 	"github.com/kotlovyim-dev/kayly/internal/deploy"
 	"github.com/kotlovyim-dev/kayly/internal/docker"
+	"github.com/kotlovyim-dev/kayly/internal/gitsrc"
 	"github.com/kotlovyim-dev/kayly/internal/notify"
 	"github.com/kotlovyim-dev/kayly/internal/offsite"
 	"github.com/kotlovyim-dev/kayly/internal/proxy"
@@ -46,6 +47,7 @@ func (p paths) key() string         { return filepath.Join(p.data, "master.key")
 func (p paths) builds() string      { return filepath.Join(p.data, "builds") }
 func (p paths) backups() string     { return filepath.Join(p.data, "backups") }
 func (p paths) logs() string        { return filepath.Join(p.data, "logs") }
+func (p paths) knownHosts() string  { return filepath.Join(p.data, "known_hosts") }
 func (p paths) caddyConfig() string { return filepath.Join(p.data, "caddy.json") }
 func (p paths) proxyDir() string    { return filepath.Join(p.run, "proxy") }
 func (p paths) caddySock() string   { return filepath.Join(p.proxyDir(), "caddy.sock") }
@@ -155,8 +157,10 @@ func serve(args []string) error {
 
 	srv := api.New(st, d, p.builds(), log)
 	srv.Version = version
+	srv.PublicURL = "https://" + *domain
 	srv.Notifier = notifier
 	srv.Offsite = uploader
+	srv.Git = &gitsrc.Fetcher{KnownHosts: p.knownHosts()}
 	srv.UI = web.UI()
 	if srv.UI == nil {
 		log.Warn("this build has no web UI; build it with `npm run build` in web/")

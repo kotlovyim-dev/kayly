@@ -45,6 +45,8 @@ Anywhere:
   kayly releases log <release> [-p project] the output of that deploy
   kayly rollback <release> [-p project]     make an earlier release live again
   kayly logs <service> [-p project] [-f] [-n lines]
+  kayly source set <git-url> [-branch main] | show | rm | deploy [ref]
+                                            follow a git repository; a push to its branch deploys
   kayly restart <service> [-p project]      stop and start one service of the live release
   kayly delete [-p project]                 remove a project with its containers, add-ons and volumes
   kayly restart <service> [-p project]      stop and start one service of the live release
@@ -109,6 +111,7 @@ func runClientCommand(cmd string, args []string) error {
 	remote := fs.Bool("remote", false, "backups: use the off-site bucket")
 	scope := fs.String("scope", "admin", "token create: read, deploy or admin")
 	expires := fs.Int("expires-days", 0, "token create: expire after this many days (0: never)")
+	branch := fs.String("branch", "main", "source set: the branch to follow")
 	from := fs.String("from", "", "backups restore: the project the backup was taken from")
 	// Flags may come before or after positional arguments.
 	var pos []string
@@ -227,6 +230,12 @@ func runClientCommand(cmd string, args []string) error {
 			return err
 		}
 		return c.stream(ctx, "/api/v1/projects/"+name+"/redeploy", "", nil)
+	case "source":
+		name, err := proj(".")
+		if err != nil {
+			return err
+		}
+		return c.source(ctx, name, pos, *branch)
 	case "restart":
 		if len(pos) != 1 {
 			return errors.New("usage: kayly restart <service> [-p project]")
@@ -891,4 +900,43 @@ func table() *tabwriter.Writer { return tabwriter.NewWriter(os.Stdout, 0, 4, 2, 
 func firstLine(s string) string {
 	line, _, _ := strings.Cut(s, "\n")
 	return line
+}
+
+func (c *client) source(ctx context.Context, name string, pos []string, branch string) error {
+	base := "/api/v1/projects/" + name + "/source"
+	switch {
+	case len(pos) == 2 && pos[0] == "set":
+		var v api.SourceView
+		if err := c.do(ctx, "PUT", base, map[string]string{"url": pos[1], "branch": branch}, &v); err != nil {
+			return err
+		}
+		c.printSource(v)
+		return nil
+	case len(pos) == 1 && pos[0] == "show":
+		var v api.SourceView
+		if err := c.do(ctx, "GET", base, nil, &v); err != nil {
+			return err
+		}
+		c.printSource(v)
+		return nil
+	case len(pos) == 1 && pos[0] == "rm":
+		return c.do(ctx, "DELETE", base, nil, nil)
+	case len(pos) >= 1 && pos[0] == "deploy" && len(pos) <= 2:
+		ref := ""
+		if len(pos) == 2 {
+			ref = pos[1]
+		}
+		body, _ := json.Marshal(map[string]string{"ref": ref})
+		return c.stream(ctx, "/api/v1/projects/"+name+"/deploys/git", "application/json", bytes.NewReader(body))
+	}
+	return errors.New("usage: kayly source set <git-url> [-branch main] | show | rm | deploy [ref]")
+}
+
+func (c *client) printSource(v api.SourceView) {
+	fmt.Printf("Following %s (%s)\n\n1. Add this deploy key to the repository (read-only):\n   %s\n", v.URL, v.Branch, v.PublicKey)
+	fmt.Printf("\n2. Add a webhook: payload URL %s, content type application/json, event \"push\"", v.WebhookURL)
+	if v.WebhookSecret != "" {
+		fmt.Printf(",\n   secret (shown once): %s", v.WebhookSecret)
+	}
+	fmt.Println()
 }

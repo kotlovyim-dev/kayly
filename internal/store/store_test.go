@@ -286,3 +286,27 @@ func TestReleaseKeepsItsCommit(t *testing.T) {
 		t.Fatalf("a release without a commit has %+v", plain.Commit)
 	}
 }
+
+func TestSource(t *testing.T) {
+	ctx := context.Background()
+	s, _ := open(t)
+	p, _ := s.CreateProject(ctx, "app")
+	if src, err := s.Source(ctx, p.ID); err != nil || src.URL != "" {
+		t.Fatalf("new project follows %+v, %v", src, err)
+	}
+	want := Source{URL: "git@github.com:me/app.git", Branch: "main", DeployKey: []byte("PRIVATE KEY"), WebhookSecret: "s3cret"}
+	must(t, s.SetSource(ctx, p.ID, want))
+	got, err := s.Source(ctx, p.ID)
+	if err != nil || got.URL != want.URL || got.Branch != "main" || string(got.DeployKey) != "PRIVATE KEY" || got.WebhookSecret != "s3cret" {
+		t.Fatalf("source = %+v, %v", got, err)
+	}
+	var raw []byte
+	must(t, s.db.QueryRowContext(ctx, "SELECT deploy_key FROM project").Scan(&raw))
+	if bytes.Contains(raw, []byte("PRIVATE KEY")) {
+		t.Error("deploy key stored in plaintext")
+	}
+	must(t, s.ClearSource(ctx, p.ID))
+	if src, _ := s.Source(ctx, p.ID); src.URL != "" || src.DeployKey != nil {
+		t.Errorf("source left after clear: %+v", src)
+	}
+}

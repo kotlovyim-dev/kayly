@@ -28,6 +28,7 @@ import (
 
 	"github.com/kotlovyim-dev/kayly/internal/config"
 	"github.com/kotlovyim-dev/kayly/internal/deploy"
+	"github.com/kotlovyim-dev/kayly/internal/gitsrc"
 	"github.com/kotlovyim-dev/kayly/internal/notify"
 	"github.com/kotlovyim-dev/kayly/internal/offsite"
 	"github.com/kotlovyim-dev/kayly/internal/store"
@@ -44,6 +45,10 @@ type Server struct {
 	UI fs.FS
 	// Notifier delivers alerts and holds their targets. Nil disables the notification routes' effect.
 	Notifier *notify.Notifier
+	// PublicURL is where the internet reaches the daemon, e.g. https://kayly.example.com.
+	PublicURL string
+	// Git fetches the sources of projects that follow a repository. Nil disables that.
+	Git *gitsrc.Fetcher
 	// Offsite uploads backups to the owner's bucket.
 	Offsite *offsite.Manager
 	// Version is Kayly's own version, shown by the server status.
@@ -99,6 +104,10 @@ func (s *Server) Handler(trusted bool) http.Handler {
 	handle("PUT /api/v1/offsite", admin, s.setOffsite)
 	handle("POST /api/v1/offsite/sync", admin, s.syncOffsite)
 	handle("POST /api/v1/offsite/drill", admin, s.drillOffsite)
+	handle("GET /api/v1/projects/{project}/source", read, s.getSource)
+	handle("PUT /api/v1/projects/{project}/source", admin, s.setSource)
+	handle("DELETE /api/v1/projects/{project}/source", admin, s.deleteSource)
+	handle("POST /api/v1/projects/{project}/deploys/git", deployScope, s.deployFromGit)
 	handle("GET /api/v1/audit", admin, s.auditLog)
 	if trusted {
 		mux.HandleFunc("GET /api/v1/tokens", s.listTokens)
@@ -109,6 +118,7 @@ func (s *Server) Handler(trusted bool) http.Handler {
 	root := http.NewServeMux()
 	root.HandleFunc("POST /api/v1/session", s.login)
 	root.HandleFunc("DELETE /api/v1/session", s.logout)
+	root.HandleFunc("POST /api/v1/hooks/github/{project}", s.githubHook)
 	root.Handle("/api/", s.requireToken(mux))
 	if s.UI != nil {
 		root.Handle("/", uiHandler(s.UI))

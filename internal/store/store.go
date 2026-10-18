@@ -128,6 +128,11 @@ CREATE TABLE audit (
 	project    TEXT NOT NULL DEFAULT '',
 	created_at INTEGER NOT NULL
 );
+`, `
+ALTER TABLE project ADD COLUMN git_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE project ADD COLUMN git_branch TEXT NOT NULL DEFAULT '';
+ALTER TABLE project ADD COLUMN deploy_key BLOB;
+ALTER TABLE project ADD COLUMN webhook_secret BLOB;
 `}
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -202,6 +207,52 @@ func (s *Store) Project(ctx context.Context, name string) (Project, error) {
 		return Project{}, fmt.Errorf("project %s: %w", name, ErrNotFound)
 	}
 	return p, err
+}
+
+// Source is the git repository a project follows. The zero value means none.
+type Source struct {
+	URL, Branch string
+	// DeployKey is the private SSH key; WebhookSecret signs the GitHub push webhook.
+	DeployKey     []byte
+	WebhookSecret string
+}
+
+// SetSource makes the project follow a repository.
+func (s *Store) SetSource(ctx context.Context, projectID int64, src Source) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE project SET git_url = ?, git_branch = ?, deploy_key = ?, webhook_secret = ? WHERE id = ?",
+		src.URL, src.Branch, s.box.Seal(src.DeployKey), s.box.Seal([]byte(src.WebhookSecret)), projectID)
+	if err != nil {
+		return fmt.Errorf("store: set source: %w", err)
+	}
+	return nil
+}
+
+// Source returns the repository a project follows, or the zero Source.
+func (s *Store) Source(ctx context.Context, projectID int64) (Source, error) {
+	var src Source
+	var key, secret []byte
+	err := s.db.QueryRowContext(ctx, "SELECT git_url, git_branch, deploy_key, webhook_secret FROM project WHERE id = ?", projectID).
+		Scan(&src.URL, &src.Branch, &key, &secret)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Source{}, fmt.Errorf("project %d: %w", projectID, ErrNotFound)
+	}
+	if err != nil || src.URL == "" {
+		return Source{}, err
+	}
+	if src.DeployKey, err = s.box.Open(key); err != nil {
+		return Source{}, err
+	}
+	sec, err := s.box.Open(secret)
+	src.WebhookSecret = string(sec)
+	return src, err
+}
+
+// ClearSource stops a project following a repository and forgets its keys.
+func (s *Store) ClearSource(ctx context.Context, projectID int64) error {
+	_, err := s.db.ExecContext(ctx,
+		"UPDATE project SET git_url = '', git_branch = '', deploy_key = NULL, webhook_secret = NULL WHERE id = ?", projectID)
+	return err
 }
 
 // DeleteProject removes a project with its releases, env, domains, add-ons and tokens.

@@ -18,6 +18,11 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" = 0 ] || die "run as root (sudo sh)"
 command -v curl >/dev/null || die "curl is required"
+# Projects that follow a git repository are cloned over SSH by the daemon.
+if ! command -v git >/dev/null || ! command -v ssh >/dev/null; then
+  say "Installing git and OpenSSH client"
+  apt-get update -qq && apt-get install -y -qq git openssh-client
+fi
 case "$(uname -m)" in
   x86_64) ARCH=amd64; RP_ARCH=x86_64; RP_SHA256=2842de93e68713af9037e0bc0a398d7da78f3b96aa4804303a638db2bc69bd30 ;;
   aarch64 | arm64) ARCH=arm64; RP_ARCH=arm64; RP_SHA256=c24a064b586b8f4f8c2fab44dd5ef19253e4c6cc4e1df793b3ae19cd87f7a5d4 ;;
