@@ -149,6 +149,7 @@ func (d *Deployer) Deploy(ctx context.Context, project, dir string, commit store
 	if err != nil {
 		return store.Release{}, err
 	}
+	notifyRelease(ctx, rel.Seq)
 	w, closeLog := d.keepLog(rel, w)
 	defer closeLog()
 	log := d.log.With("project", p.Name, "release", rel.Seq)
@@ -276,6 +277,7 @@ func (d *Deployer) Rollback(ctx context.Context, project string, seq int, w io.W
 	if err := d.ensureInfra(ctx, p.Name, cfg); err != nil {
 		return err
 	}
+	notifyRelease(ctx, seq)
 	step(w, fmt.Sprintf("roll back to r%d", seq))
 	if err := d.activate(ctx, p, rel, cfg, w); err != nil {
 		cctx := context.WithoutCancel(ctx)
@@ -612,6 +614,7 @@ func (d *Deployer) Redeploy(ctx context.Context, project string, w io.Writer) (s
 	if err != nil {
 		return store.Release{}, err
 	}
+	notifyRelease(ctx, rel.Seq)
 	w, closeLog := d.keepLog(rel, w)
 	defer closeLog()
 	// Each release owns its tag, so pruning r(n) never removes the image of r(n+1).

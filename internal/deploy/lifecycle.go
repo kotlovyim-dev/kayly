@@ -107,3 +107,18 @@ func (d *Deployer) DeleteProject(ctx context.Context, project string) error {
 	}
 	return errors.Join(errs...)
 }
+
+type releaseNotifyKey struct{}
+
+// WithReleaseNotify makes Deploy, Redeploy and Rollback call fn with the release number as
+// soon as it is known, before the pipeline runs. Callers that do not wait for a deploy to
+// finish use it to say which release is coming.
+func WithReleaseNotify(ctx context.Context, fn func(seq int)) context.Context {
+	return context.WithValue(ctx, releaseNotifyKey{}, fn)
+}
+
+func notifyRelease(ctx context.Context, seq int) {
+	if fn, ok := ctx.Value(releaseNotifyKey{}).(func(int)); ok {
+		fn(seq)
+	}
+}

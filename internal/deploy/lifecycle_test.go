@@ -1,7 +1,10 @@
 package deploy
 
 import (
+	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -63,5 +66,27 @@ func TestDeleteProjectRemovesEverythingButBackups(t *testing.T) {
 	}
 	if _, err := h.st.Project(ctx, "other"); err != nil {
 		t.Errorf("another project was touched: %v", err)
+	}
+}
+
+func TestReleaseNumberIsAnnouncedBeforeThePipelineRuns(t *testing.T) {
+	h := newHarness(t)
+	var got []int
+	ctx := WithReleaseNotify(context.Background(), func(seq int) { got = append(got, seq) })
+
+	must(t, os.WriteFile(filepath.Join(h.dir, "x"), nil, 0o644))
+	var log bytes.Buffer
+	if _, err := h.d.Deploy(ctx, "app", h.dir, store.Commit{}, &log); err != nil {
+		t.Fatalf("deploy: %v\n%s", err, &log)
+	}
+	if _, err := h.d.Deploy(ctx, "app", h.dir, store.Commit{}, &log); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.d.Redeploy(ctx, "app", &log); err != nil {
+		t.Fatal(err)
+	}
+	must(t, h.d.Rollback(ctx, "app", 2, &log))
+	if !slices.Equal(got, []int{1, 2, 3, 2}) {
+		t.Errorf("announced %v, want [1 2 3 2]", got)
 	}
 }

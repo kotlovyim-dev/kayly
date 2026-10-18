@@ -119,6 +119,7 @@ func (s *Server) Handler(trusted bool) http.Handler {
 	root.HandleFunc("POST /api/v1/session", s.login)
 	root.HandleFunc("DELETE /api/v1/session", s.logout)
 	root.HandleFunc("POST /api/v1/hooks/github/{project}", s.githubHook)
+	root.Handle("/mcp", s.requireToken(s.mcpHandler()))
 	root.Handle("/api/", s.requireToken(mux))
 	if s.UI != nil {
 		root.Handle("/", uiHandler(s.UI))
@@ -149,21 +150,29 @@ func (s *Server) audit(r *http.Request, action, project string) {
 	}
 }
 
+// denial says why tok may not do something that needs scope on project ("" for a call that
+// names no project), or "" if it may. A project-bound token reaches only its own project, and
+// of the calls that name none only those with projectFree.
+func denial(tok store.Token, scope, project string, projectFree bool) (msg, hint string) {
+	if !tok.Allows(scope) {
+		return fmt.Sprintf("this token has the %s scope; this needs %s", tok.Scope, scope),
+			"create a token with a wider scope: kayly token create <name> -scope " + scope
+	}
+	if tok.Project != "" && (project != "" && project != tok.Project || project == "" && !projectFree) {
+		return "this token is limited to project " + tok.Project, ""
+	}
+	return "", ""
+}
+
 // authorize refuses a request whose token has too little scope or belongs to another
 // project, and audits the ones that change something.
 func (s *Server) authorize(pattern, scope string, next http.HandlerFunc) http.Handler {
 	write := !strings.HasPrefix(pattern, "GET ")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tok, _ := r.Context().Value(tokenKey{}).(store.Token)
-		if !tok.Allows(scope) {
-			writeError(w, http.StatusForbidden, "forbidden",
-				fmt.Sprintf("this token has the %s scope; this needs %s", tok.Scope, scope),
-				"create a token with a wider scope: kayly token create <name> -scope "+scope)
-			return
-		}
 		name := r.PathValue("project")
-		if tok.Project != "" && (name != "" && name != tok.Project || name == "" && !boundOK[pattern]) {
-			writeError(w, http.StatusForbidden, "forbidden", "this token is limited to project "+tok.Project, "")
+		if msg, hint := denial(tok, scope, name, boundOK[pattern]); msg != "" {
+			writeError(w, http.StatusForbidden, "forbidden", msg, hint)
 			return
 		}
 		if write {
@@ -273,29 +282,36 @@ type ProjectView struct {
 }
 
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
-	projects, err := s.store.Projects(r.Context())
+	out, err := s.projectViews(r.Context(), r.Context().Value(tokenKey{}).(store.Token))
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	bound := r.Context().Value(tokenKey{}).(store.Token).Project
+	writeJSON(w, http.StatusOK, out)
+}
+
+// projectViews lists the projects tok may see.
+func (s *Server) projectViews(ctx context.Context, tok store.Token) ([]ProjectView, error) {
+	projects, err := s.store.Projects(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := []ProjectView{}
 	for _, p := range projects {
-		if bound != "" && p.Name != bound {
+		if tok.Project != "" && p.Name != tok.Project {
 			continue
 		}
 		v := ProjectView{Name: p.Name, CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339)}
 		if p.ActiveRelease != 0 {
-			rel, err := s.store.ReleaseByID(r.Context(), p.ActiveRelease)
+			rel, err := s.store.ReleaseByID(ctx, p.ActiveRelease)
 			if err != nil {
-				s.fail(w, r, err)
-				return
+				return nil, err
 			}
 			v.LiveSeq, v.LiveSince = rel.Seq, rel.CreatedAt.UTC().Format(time.RFC3339)
 		}
 		out = append(out, v)
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
@@ -330,42 +346,52 @@ type ProjectDetail struct {
 	Releases []ReleaseView        `json:"releases"`
 	Domains  []DomainView         `json:"domains"`
 	EnvKeys  []string             `json:"env_keys"`
+	// MissingEnv are keys the live release declares and needs but has no value for: the next
+	// deploy would fail on them.
+	MissingEnv []string `json:"missing_env"`
 }
 
 func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	p, ok := s.project(w, r)
 	if !ok {
 		return
 	}
-	d := ProjectDetail{ProjectView: ProjectView{Name: p.Name, CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339)}}
-	var err error
-	if d.Services, err = s.deployer.Services(ctx, p.Name, false); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	if d.Addons, err = s.deployer.Addons(ctx, p.Name); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	rels, err := s.store.Releases(ctx, p.ID, 20)
+	d, err := s.projectDetail(r.Context(), p)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	d.Addons = redactAddons(r.Context().Value(tokenKey{}).(store.Token), d.Addons)
+	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) projectDetail(ctx context.Context, p store.Project) (ProjectDetail, error) {
+	d := ProjectDetail{ProjectView: ProjectView{Name: p.Name, CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339)}}
+	var err error
+	if d.Services, err = s.deployer.Services(ctx, p.Name, false); err != nil {
+		return d, err
+	}
+	if d.Addons, err = s.deployer.Addons(ctx, p.Name); err != nil {
+		return d, err
+	}
+	rels, err := s.store.Releases(ctx, p.ID, 20)
+	if err != nil {
+		return d, err
+	}
 	d.Releases = []ReleaseView{}
+	var live *config.Config
 	for _, rel := range rels {
 		v := releaseView(rel)
 		v.CanRollBack = s.deployer.CanRollBack(ctx, rel)
 		d.Releases = append(d.Releases, v)
 		if rel.ID == p.ActiveRelease {
 			d.LiveSeq, d.LiveSince = rel.Seq, rel.CreatedAt.UTC().Format(time.RFC3339)
+			live, _ = config.Parse(rel.Config)
 		}
 	}
 	ds, err := s.store.Domains(ctx, p.ID)
 	if err != nil {
-		s.fail(w, r, err)
-		return
+		return d, err
 	}
 	d.Domains = []DomainView{}
 	for _, dm := range ds {
@@ -373,11 +399,19 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 	}
 	env, err := s.store.Env(ctx, p.ID)
 	if err != nil {
-		s.fail(w, r, err)
-		return
+		return d, err
 	}
 	d.EnvKeys = slices.Sorted(maps.Keys(env))
-	writeJSON(w, http.StatusOK, d)
+	d.MissingEnv = []string{}
+	if live != nil {
+		for _, key := range slices.Sorted(maps.Keys(live.Env)) {
+			spec := live.Env[key]
+			if _, set := env[key]; !set && spec.IsRequired() && spec.Generate == "" && spec.Template == "" {
+				d.MissingEnv = append(d.MissingEnv, key)
+			}
+		}
+	}
+	return d, nil
 }
 
 func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
@@ -414,7 +448,20 @@ func (s *Server) listAddons(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, as)
+	writeJSON(w, http.StatusOK, redactAddons(r.Context().Value(tokenKey{}).(store.Token), as))
+}
+
+// redactAddons hides the connection URLs, which carry the superuser password, from tokens
+// below admin.
+func redactAddons(tok store.Token, as []deploy.AddonView) []deploy.AddonView {
+	if tok.Allows(store.ScopeAdmin) {
+		return as
+	}
+	out := slices.Clone(as)
+	for i := range out {
+		out[i].URL = ""
+	}
+	return out
 }
 
 func (s *Server) addAddon(w http.ResponseWriter, r *http.Request) {
@@ -583,18 +630,26 @@ func (s *Server) listReleases(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rels, err := s.store.Releases(r.Context(), p.ID, 20)
+	out, err := s.releaseViews(r.Context(), p)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) releaseViews(ctx context.Context, p store.Project) ([]ReleaseView, error) {
+	rels, err := s.store.Releases(ctx, p.ID, 20)
+	if err != nil {
+		return nil, err
+	}
 	out := []ReleaseView{}
 	for _, rel := range rels {
 		v := releaseView(rel)
-		v.CanRollBack = s.deployer.CanRollBack(r.Context(), rel)
+		v.CanRollBack = s.deployer.CanRollBack(ctx, rel)
 		out = append(out, v)
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 // Result ends a deploy or rollback stream.
@@ -721,14 +776,21 @@ func (s *Server) listEnv(w http.ResponseWriter, r *http.Request) {
 
 var envKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
+func checkEnvKey(key string) error {
+	if !envKeyRe.MatchString(key) {
+		return fmt.Errorf("%q is not a valid env key", key)
+	}
+	return nil
+}
+
 func (s *Server) setEnv(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.project(w, r)
 	if !ok {
 		return
 	}
 	key := r.PathValue("key")
-	if !envKeyRe.MatchString(key) {
-		writeError(w, http.StatusBadRequest, "invalid_key", fmt.Sprintf("%q is not a valid env key", key), "use A-Z, 0-9 and _")
+	if err := checkEnvKey(key); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_key", err.Error(), "use A-Z, 0-9 and _")
 		return
 	}
 	var body struct {
@@ -790,24 +852,40 @@ func (s *Server) addDomain(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	body.Hostname = strings.ToLower(strings.TrimSuffix(body.Hostname, "."))
-	if !hostnameRe.MatchString(body.Hostname) || len(body.Hostname) > 253 {
-		writeError(w, http.StatusBadRequest, "invalid_hostname", fmt.Sprintf("%q is not a hostname", body.Hostname), "")
-		return
-	}
-	if !config.ValidName(body.Service) {
-		writeError(w, http.StatusBadRequest, "invalid_service", fmt.Sprintf("%q is not a service name", body.Service), "")
-		return
-	}
-	if err := s.store.AddDomain(r.Context(), store.Domain{Hostname: body.Hostname, ProjectID: p.ID, Service: body.Service}); err != nil {
-		writeError(w, http.StatusConflict, "domain_taken", body.Hostname+" is already routed", "")
-		return
-	}
-	if err := s.deployer.ReloadProxy(r.Context()); err != nil {
+	d, err := s.routeDomain(r.Context(), p, body)
+	var ce *clientError
+	switch {
+	case errors.As(err, &ce):
+		writeError(w, ce.status, ce.code, ce.Error(), "")
+	case err != nil:
 		s.fail(w, r, err)
-		return
+	default:
+		writeJSON(w, http.StatusCreated, d)
 	}
-	writeJSON(w, http.StatusCreated, body)
+}
+
+// clientError is a refused request: the caller asked for something invalid or taken.
+type clientError struct {
+	status int
+	code   string
+	msg    string
+}
+
+func (e *clientError) Error() string { return e.msg }
+
+// routeDomain validates a custom domain, records it and reloads the proxy.
+func (s *Server) routeDomain(ctx context.Context, p store.Project, d DomainView) (DomainView, error) {
+	d.Hostname = strings.ToLower(strings.TrimSuffix(d.Hostname, "."))
+	if !hostnameRe.MatchString(d.Hostname) || len(d.Hostname) > 253 {
+		return d, &clientError{http.StatusBadRequest, "invalid_hostname", fmt.Sprintf("%q is not a hostname", d.Hostname)}
+	}
+	if !config.ValidName(d.Service) {
+		return d, &clientError{http.StatusBadRequest, "invalid_service", fmt.Sprintf("%q is not a service name", d.Service)}
+	}
+	if err := s.store.AddDomain(ctx, store.Domain{Hostname: d.Hostname, ProjectID: p.ID, Service: d.Service}); err != nil {
+		return d, &clientError{http.StatusConflict, "domain_taken", d.Hostname + " is already routed"}
+	}
+	return d, s.deployer.ReloadProxy(ctx)
 }
 
 func (s *Server) removeDomain(w http.ResponseWriter, r *http.Request) {
@@ -815,25 +893,31 @@ func (s *Server) removeDomain(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	host := r.PathValue("hostname")
-	ds, err := s.store.Domains(r.Context(), p.ID)
-	if err != nil {
+	err := s.dropDomain(r.Context(), p, r.PathValue("hostname"))
+	var ce *clientError
+	switch {
+	case errors.As(err, &ce):
+		writeError(w, ce.status, ce.code, ce.Error(), "")
+	case err != nil:
 		s.fail(w, r, err)
-		return
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// dropDomain removes a custom domain of p and reloads the proxy.
+func (s *Server) dropDomain(ctx context.Context, p store.Project, host string) error {
+	ds, err := s.store.Domains(ctx, p.ID)
+	if err != nil {
+		return err
 	}
 	if !slices.ContainsFunc(ds, func(d store.Domain) bool { return d.Hostname == host }) {
-		writeError(w, http.StatusNotFound, "not_found", host+" is not a domain of "+p.Name, "")
-		return
+		return &clientError{http.StatusNotFound, "not_found", host + " is not a domain of " + p.Name}
 	}
-	if err := s.store.RemoveDomain(r.Context(), host); err != nil {
-		s.fail(w, r, err)
-		return
+	if err := s.store.RemoveDomain(ctx, host); err != nil {
+		return err
 	}
-	if err := s.deployer.ReloadProxy(r.Context()); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	return s.deployer.ReloadProxy(ctx)
 }
 
 // TokenView is an API token; Token is set only when it was just created.

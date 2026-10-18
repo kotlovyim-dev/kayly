@@ -252,12 +252,13 @@ claude mcp add --transport http kayly https://kayly.<host>/mcp --header "Authori
 
 | Scope | Tools |
 |---|---|
-| `read` | `list_projects`, `get_project` (live release, service states and restarts, URLs, missing env keys, add-ons), `list_releases`, `get_release` (status, error, log tail), `get_logs` (service, tail, since, grep), `list_env` (keys and which services get them), `list_domains` (DNS and certificate state), `list_backups`, `server_status` (disk, memory, versions), `validate_config` (parses a `kayly.toml`, returns errors with line numbers) |
+| `read` | `list_projects`, `get_project` (live release, service states and restarts, URLs, missing env keys, add-ons), `list_releases`, `get_release` (status, error, log tail), `get_logs` (service, tail, grep), `list_env` (keys, whether set, which services get them), `list_domains` (hostname and service; DNS and certificate state wait until Kayly tracks them), `list_backups`, `server_status` (disk, memory, versions), `validate_config` (parses a `kayly.toml`, returns errors with line numbers) |
 | `deploy` | `deploy` (a git ref of the project's source), `redeploy`, `rollback`, `restart_service`, `set_env`, `delete_env`, `add_domain`, `remove_domain`, `create_backup` |
 | `admin` | `add_addon`, `remove_addon`, `restore_backup`, `delete_project` |
 
 - Tools call the same `deploy` functions as the HTTP handlers; MCP adds no logic of its own.
-- No tool returns an env value or a credential. `set_env` writes; nothing reads back.
+- No tool returns an env value or a credential. `set_env` writes; nothing reads back. Add-on connection URLs carry the superuser password, so they are left out of every MCP answer and of the HTTP API below `admin`.
+- A token sees only the tools its scope allows, and each call is checked again for the project it names. Calls are audited as `mcp <tool>` under the token's name.
 - Destructive tools carry `destructiveHint` and require `confirm` equal to the project name, the rule the UI uses.
 - `deploy`, `redeploy` and `rollback` return the release number at once; `wait` (up to 60 s) blocks for the outcome, otherwise the agent polls `get_release`.
 - Output is capped (logs at 32 KB) so a tool call cannot flood the agent's context.

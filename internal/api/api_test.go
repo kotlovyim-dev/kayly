@@ -110,6 +110,7 @@ type env struct {
 	trusted http.Handler
 	public  http.Handler
 	px      *recordingProxy
+	server  *Server
 }
 
 func newEnv(t *testing.T) *env {
@@ -131,7 +132,7 @@ func newEnv(t *testing.T) *env {
 		"index.html":      {Data: []byte("<!doctype html>ui")},
 		"assets/app-1.js": {Data: []byte("js")},
 	}
-	return &env{t: t, trusted: s.Handler(true), public: s.Handler(false), px: px}
+	return &env{t: t, trusted: s.Handler(true), public: s.Handler(false), px: px, server: s}
 }
 
 func (e *env) do(h http.Handler, method, path, body, token string) (int, string) {
