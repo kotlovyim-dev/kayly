@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,4 +74,11 @@ func run(ctx context.Context, w io.Writer, name string, args ...string) error {
 		return fmt.Errorf("%s %s: %w", filepath.Base(name), args[0], err)
 	}
 	return nil
+}
+
+// TrimCache removes the least recently used build cache until at most maxBytes remain. Cache
+// is what makes a deploy fast, so it is kept up to that size; images of releases are not
+// touched (Kayly prunes those itself).
+func (b *Builder) TrimCache(ctx context.Context, maxBytes int64, w io.Writer) error {
+	return run(ctx, w, b.Docker, "buildx", "prune", "--force", "--max-used-space", strconv.FormatInt(maxBytes, 10))
 }

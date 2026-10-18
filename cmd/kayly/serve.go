@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/kotlovyim-dev/kayly/internal/api"
 	"github.com/kotlovyim-dev/kayly/internal/build"
+	"github.com/kotlovyim-dev/kayly/internal/config"
 	"github.com/kotlovyim-dev/kayly/internal/deploy"
 	"github.com/kotlovyim-dev/kayly/internal/docker"
 	"github.com/kotlovyim-dev/kayly/internal/notify"
@@ -60,6 +62,7 @@ func serve(args []string) error {
 	domain := fs.String("domain", "", "hostname of the Kayly API (default kayly.<base-domain>)")
 	email := fs.String("email", "", "contact email for Let's Encrypt (optional)")
 	railpack := fs.String("railpack", "railpack", "path to the railpack CLI")
+	cacheMax := fs.String("build-cache", "10g", "most disk the build cache may keep (k, m or g)")
 	fs.Parse(args)
 	if *domain == "" && *base != "" {
 		*domain = "kayly." + *base
@@ -119,11 +122,16 @@ func serve(args []string) error {
 	if err := ensureProxy(ctx, rt, p, adminListen); err != nil {
 		return err
 	}
+	var cacheLimit config.ByteSize
+	if err := cacheLimit.UnmarshalText([]byte(*cacheMax)); err != nil {
+		return fmt.Errorf("--build-cache: %w", err)
+	}
+	builder := &build.Builder{Docker: "docker", Railpack: *railpack, Frontend: railpackFrontend}
 	px := proxy.NewClient(p.caddySock())
 	notifier := notify.New(st, log)
 	uploader := offsite.New(st, p.backups(), notifier.Notify, log)
 	d := deploy.New(st, rt,
-		&build.Builder{Docker: "docker", Railpack: *railpack, Frontend: railpackFrontend},
+		builder,
 		px,
 		deploy.Options{
 			BaseDomain:  *base,
@@ -131,6 +139,7 @@ func serve(args []string) error {
 			ExtraRoutes: []proxy.Route{{Host: *domain, Upstream: "unix/" + p.publicSock()}},
 			BackupDir:   p.backups(),
 			LogDir:      p.logs(),
+			DiskPath:    p.data,
 			Notify:      notifier.Notify,
 			KeyFile:     p.key(),
 			Offsite:     uploader,
@@ -185,6 +194,7 @@ func serve(args []string) error {
 				log.Error("ensure proxy", "err", err)
 			}
 			d.DailyBackups(ctx)
+			d.Watch(ctx)
 		}
 	}()
 	// Backups reach the bucket within minutes of being written; an outage only delays them.
@@ -201,6 +211,22 @@ func serve(args []string) error {
 				return
 			case <-t.C:
 			}
+		}
+	}()
+	// The build cache grows with every deploy; keep the recent part of it.
+	go func() {
+		t := time.NewTimer(10 * time.Minute) // not while the server is still starting up
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+			if err := builder.TrimCache(ctx, int64(cacheLimit), io.Discard); err != nil {
+				log.Error("trim build cache", "err", err)
+			}
+			t.Reset(24 * time.Hour)
 		}
 	}()
 	log.Info("kayly serving", "api", "https://"+*domain, "admin_socket", adminSock(*run))

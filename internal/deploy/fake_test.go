@@ -47,6 +47,8 @@ type fakeContainer struct {
 	running bool
 	exit    int
 	health  string
+	// restarts is the container's RestartCount.
+	restarts int
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -173,7 +175,7 @@ func (f *fakeRuntime) Inspect(_ context.Context, name string) (Container, error)
 func (f *fakeRuntime) view(name string, c *fakeContainer) Container {
 	v := Container{
 		Name: name, Labels: c.spec.Labels, Running: c.running, ExitCode: c.exit,
-		StartedAt: time.Now().Add(-time.Hour), Health: c.health,
+		StartedAt: time.Now().Add(-time.Hour), Health: c.health, RestartCount: c.restarts,
 	}
 	for _, n := range c.spec.Networks {
 		if n.Name == EdgeNetwork {
@@ -181,6 +183,13 @@ func (f *fakeRuntime) view(name string, c *fakeContainer) Container {
 		}
 	}
 	return v
+}
+
+// setRestarts sets a container's RestartCount, as Docker would after crashes.
+func (f *fakeRuntime) setRestarts(name string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.containers[name].restarts = n
 }
 
 func (f *fakeRuntime) Remove(_ context.Context, name string, _ time.Duration) error {

@@ -46,6 +46,8 @@ type Options struct {
 	BackupDir string
 	// LogDir keeps the output of every deploy, one file per release. Empty keeps none.
 	LogDir string
+	// DiskPath is a path on the server's data disk, watched for filling up. Empty disables it.
+	DiskPath string
 	// Offsite reads the owner's bucket for restores and drills. Nil without off-site backups.
 	Offsite Offsite
 	// KeyFile is the master key, which a Kayly backup carries with the database snapshot.
@@ -72,6 +74,10 @@ type Deployer struct {
 
 	// checkHealth probes addr ("ip:port"). Replaced in tests.
 	checkHealth func(ctx context.Context, addr, path string) error
+	// clock and diskUsage are replaced in tests.
+	clock     func() time.Time
+	diskUsage func(path string) (used, total uint64, err error)
+	watch     watcher
 	// settle is how long a service without a port must run before it counts as healthy.
 	settle time.Duration
 }
@@ -94,6 +100,8 @@ func New(st *store.Store, rt Runtime, b Builder, p Proxy, opt Options, log *slog
 		store: st, rt: rt, builder: b, proxy: p, opt: opt, log: log,
 		locks:       map[string]*sync.Mutex{},
 		checkHealth: probe,
+		clock:       time.Now,
+		diskUsage:   statfsUsage,
 		settle:      10 * time.Second,
 	}
 }

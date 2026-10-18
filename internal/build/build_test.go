@@ -104,3 +104,24 @@ func TestBuildFailureIsReported(t *testing.T) {
 		t.Fatalf("err = %v, log:\n%s", err, log.String())
 	}
 }
+
+func TestTrimCacheKeepsAtMostTheGivenSize(t *testing.T) {
+	// A stand-in docker CLI that records its arguments, so the real cache is left alone.
+	dir := t.TempDir()
+	record := filepath.Join(dir, "args")
+	script := filepath.Join(dir, "docker")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" > "+record+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := (&Builder{Docker: script}).TrimCache(context.Background(), 10<<30, &out); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(record)
+	if want := "buildx prune --force --max-used-space 10737418240\n"; string(got) != want {
+		t.Fatalf("docker was run with %q, want %q", got, want)
+	}
+	if err := (&Builder{Docker: filepath.Join(dir, "missing")}).TrimCache(context.Background(), 1<<30, &out); err == nil {
+		t.Fatal("a missing docker was not reported")
+	}
+}
