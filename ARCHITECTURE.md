@@ -277,6 +277,7 @@ internal/deploy/      pipeline, rollback, redeploy, reconciler, add-ons, backups
 internal/proxy/       Caddy JSON generation (pure) + admin API client
 internal/secret/      encryption, generators
 internal/notify/      Telegram and webhook delivery; targets live in the `setting` table
+internal/telegram/    Bot API calls for bot services: getMe, webhook, menu button
 internal/offsite/     encrypted copies of backups in an S3 bucket: crypto, retention, sync
 internal/api/         HTTP handlers, auth, SSE, MCP
 web/                  UI (pnpm, Vite); `dist/` embedded
