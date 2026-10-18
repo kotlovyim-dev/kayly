@@ -1,0 +1,12 @@
+[services.web]
+port = 3000
+health = "/health"
+
+[services.web.telegram]
+token = "BOT_TOKEN"
+mode = "webhook"
+path = "/telegram"
+menu_button = { text = "Open", url = "${web.url}" }   # this service opens as the Mini App
+
+[env]
+BOT_TOKEN = {}      # from @BotFather: kayly env set BOT_TOKEN=...

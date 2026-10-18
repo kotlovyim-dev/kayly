@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Mini App</title>
+	<style>
+		:root { color-scheme: light dark; }
+		body { margin: 0; padding: 24px 16px; font: 17px/1.4 system-ui, sans-serif; }
+	</style>
+</head>
+<body>
+	<h1 id="hello">…</h1>
+	<p id="note"></p>
+	<script>
+		// Telegram passes the launch data in the URL fragment; tgWebAppData is the signed initData.
+		// The server checks the signature: never trust a user the page parsed by itself.
+		const initData = new URLSearchParams(location.hash.slice(1)).get("tgWebAppData") ?? "";
+		fetch("/api/me", { method: "POST", body: initData })
+			.then((r) => r.json().then((body) => ({ ok: r.ok, body })))
+			.then(({ ok, body }) => {
+				document.getElementById("hello").textContent = ok ? `Hello, ${body.first_name}` : "Hello";
+				document.getElementById("note").textContent = ok
+					? `Telegram vouches that you are user ${body.id}.`
+					: "Open this page from the bot's menu button in Telegram.";
+			});
+	</script>
+</body>
+</html>

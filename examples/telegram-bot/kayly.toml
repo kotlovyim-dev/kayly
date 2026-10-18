@@ -1,0 +1,11 @@
+[services.bot]
+port = 8080
+health = "/health"
+
+[services.bot.telegram]
+token = "BOT_TOKEN"
+mode = "webhook"    # or "polling": then remove `path`
+path = "/telegram"
+
+[env]
+BOT_TOKEN = {}      # from @BotFather: kayly env set BOT_TOKEN=...

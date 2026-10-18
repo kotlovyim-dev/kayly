@@ -58,6 +58,18 @@ kayly status                         # server disk and memory; state, restarts, 
 
 Limits per service, so one runaway process cannot starve the rest: `memory = "512m"` and `cpus = 1.5` under `[services.<name>]`.
 
+## Telegram bots and Mini Apps
+
+```toml
+[services.bot.telegram]
+token = "BOT_TOKEN"          # the [env] key that holds the token
+mode = "webhook"             # or "polling"
+path = "/telegram"
+menu_button = { text = "Open", url = "${web.url}" }   # optional: opens a Mini App
+```
+
+Kayly checks the token before a release starts, sets the webhook (with a secret it generates) or clears it for polling, and keeps the menu button pointed at your app. Examples: [a bot](examples/telegram-bot) and [a Mini App](examples/telegram-mini-app).
+
 ## Alerts and backups
 
 ```sh

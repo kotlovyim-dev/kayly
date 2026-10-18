@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"maps"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -319,6 +320,19 @@ func TestLimits(t *testing.T) {
 	} {
 		if _, err := Parse([]byte("[services.web]\n" + bad + "\n")); err == nil {
 			t.Errorf("%s accepted", bad)
+		}
+	}
+}
+
+// The example apps are documentation; they must stay valid as the format changes.
+func TestExamplesParse(t *testing.T) {
+	dirs, err := filepath.Glob("../../examples/*")
+	if err != nil || len(dirs) == 0 {
+		t.Fatalf("no examples: %v", err)
+	}
+	for _, dir := range dirs {
+		if _, err := Load(dir); err != nil {
+			t.Errorf("%s: %v", dir, err)
 		}
 	}
 }
