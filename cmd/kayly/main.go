@@ -45,6 +45,10 @@ Anywhere:
   kayly releases log <release> [-p project] the output of that deploy
   kayly rollback <release> [-p project]     make an earlier release live again
   kayly logs <service> [-p project] [-f] [-n lines]
+  kayly restart <service> [-p project]      stop and start one service of the live release
+  kayly delete [-p project]                 remove a project with its containers, add-ons and volumes
+  kayly restart <service> [-p project]      stop and start one service of the live release
+  kayly delete [-p project]                 remove a project with its containers, add-ons and volumes
   kayly redeploy [-p project]               release the live image again with current env and add-ons
   kayly env ls | set KEY=value... | rm KEY... [-p project]
   kayly domains ls | add <hostname> <service> | rm <hostname> [-p project]
@@ -223,6 +227,26 @@ func runClientCommand(cmd string, args []string) error {
 			return err
 		}
 		return c.stream(ctx, "/api/v1/projects/"+name+"/redeploy", "", nil)
+	case "restart":
+		if len(pos) != 1 {
+			return errors.New("usage: kayly restart <service> [-p project]")
+		}
+		name, err := proj(".")
+		if err != nil {
+			return err
+		}
+		return c.do(ctx, "POST", "/api/v1/projects/"+name+"/services/"+pos[0]+"/restart", nil, nil)
+	case "delete":
+		name, err := proj(".")
+		if err != nil {
+			return err
+		}
+		fmt.Printf("This deletes %s with its containers, add-ons and volumes (backups are kept).\nType the project name to confirm: ", name)
+		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if strings.TrimSpace(answer) != name {
+			return errors.New("not confirmed; nothing deleted")
+		}
+		return c.do(ctx, "DELETE", "/api/v1/projects/"+name+"?confirm="+url.QueryEscape(name), nil, nil)
 	case "addons":
 		return c.addons(ctx, proj, pos)
 	case "backups":

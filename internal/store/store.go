@@ -204,6 +204,18 @@ func (s *Store) Project(ctx context.Context, name string) (Project, error) {
 	return p, err
 }
 
+// DeleteProject removes a project with its releases, env, domains, add-ons and tokens.
+func (s *Store) DeleteProject(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, "DELETE FROM project WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("store: delete project: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("project %d: %w", id, ErrNotFound)
+	}
+	return nil
+}
+
 // Projects returns every project ordered by name.
 func (s *Store) Projects(ctx context.Context) ([]Project, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+projectCols+" FROM project ORDER BY name")

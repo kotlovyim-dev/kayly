@@ -68,7 +68,9 @@ func (s *Server) Handler(trusted bool) http.Handler {
 	handle("GET /api/v1/projects", read, s.listProjects)
 	handle("POST /api/v1/projects", admin, s.createProject)
 	handle("GET /api/v1/projects/{project}", read, s.getProject)
+	handle("DELETE /api/v1/projects/{project}", admin, s.deleteProject)
 	handle("GET /api/v1/projects/{project}/services", read, s.listServices)
+	handle("POST /api/v1/projects/{project}/services/{service}/restart", deployScope, s.restartService)
 	handle("GET /api/v1/server", read, s.serverStatus)
 	handle("GET /api/v1/projects/{project}/releases", read, s.listReleases)
 	handle("GET /api/v1/projects/{project}/releases/{seq}/log", read, s.releaseLog)
@@ -366,6 +368,28 @@ func (s *Server) getProject(w http.ResponseWriter, r *http.Request) {
 	}
 	d.EnvKeys = slices.Sorted(maps.Keys(env))
 	writeJSON(w, http.StatusOK, d)
+}
+
+func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("project")
+	if r.URL.Query().Get("confirm") != name {
+		writeError(w, http.StatusBadRequest, "confirm_required", "deleting a project removes its containers, add-ons and volumes",
+			"confirm with the project name: DELETE ...?confirm="+name)
+		return
+	}
+	if err := s.deployer.DeleteProject(context.WithoutCancel(r.Context()), name); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) restartService(w http.ResponseWriter, r *http.Request) {
+	if err := s.deployer.RestartService(context.WithoutCancel(r.Context()), r.PathValue("project"), r.PathValue("service")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) redeploy(w http.ResponseWriter, r *http.Request) {

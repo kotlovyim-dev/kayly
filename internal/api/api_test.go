@@ -385,6 +385,9 @@ func TestTokenScopeAndProject(t *testing.T) {
 		{agent, "GET", "/api/v1/projects/other", 403},
 		{agent, "POST", "/api/v1/projects/app/addons", 403},
 		{agent, "POST", "/api/v1/projects", 403},
+		{agent, "DELETE", "/api/v1/projects/app?confirm=app", 403},
+		{boundAdmin, "DELETE", "/api/v1/projects/other?confirm=other", 403},
+		{boundAdmin, "DELETE", "/api/v1/projects/app", 400}, // needs the typed name
 		{agent, "GET", "/api/v1/notifications", 403},
 		{agent, "GET", "/api/v1/projects", 200},
 	} {
