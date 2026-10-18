@@ -44,6 +44,8 @@ type Options struct {
 	KeepImages int
 	// BackupDir holds database dumps, one directory per project. Empty disables backups.
 	BackupDir string
+	// Offsite reads the owner's bucket for restores and drills. Nil without off-site backups.
+	Offsite Offsite
 	// KeyFile is the master key, which a Kayly backup carries with the database snapshot.
 	KeyFile string
 	// Notify tells the owner about a failure. Nil sends nothing.

@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kotlovyim-dev/kayly/internal/deploy"
 )
 
 const settingKey = "offsite"
@@ -171,13 +173,13 @@ func (m *Manager) sync(ctx context.Context, c Config) error {
 	if err != nil {
 		return err
 	}
-	keys, err := b.Keys(ctx)
+	listed, err := b.List(ctx)
 	if err != nil {
 		return fmt.Errorf("list bucket: %w", err)
 	}
 	have := map[string]bool{}
-	for _, k := range keys {
-		have[k] = true
+	for _, o := range listed {
+		have[o.Key] = true
 	}
 	var errs []error
 	projects, _ := os.ReadDir(m.dir)
@@ -229,4 +231,75 @@ func (m *Manager) upload(ctx context.Context, b Bucket, c Config, key, path stri
 	err = b.Put(ctx, key, pr, EncryptedSize(fi.Size()))
 	pr.CloseWithError(err) // unblock the encrypting goroutine if Put gave up early
 	return err
+}
+
+// Enabled reports whether a bucket is configured.
+func (m *Manager) Enabled(ctx context.Context) (bool, error) {
+	_, ok, err := m.config(ctx)
+	return ok, err
+}
+
+// List returns a project's backups in the bucket, newest first.
+func (m *Manager) List(ctx context.Context, project string) ([]deploy.Backup, error) {
+	c, ok, err := m.config(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errNotConfigured
+	}
+	b, err := m.open(c)
+	if err != nil {
+		return nil, err
+	}
+	objs, err := b.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list bucket: %w", err)
+	}
+	out := []deploy.Backup{}
+	for _, o := range objs {
+		dir, file, _ := strings.Cut(o.Key, "/")
+		name, isBackup := strings.CutSuffix(file, ".enc")
+		if dir != project || !isBackup {
+			continue
+		}
+		if t, err := time.Parse("20060102T150405Z", name[:min(len(name), 16)]); err == nil {
+			out = append(out, deploy.Backup{Name: name, Size: o.Size, CreatedAt: t})
+		}
+	}
+	slices.SortFunc(out, func(a, b deploy.Backup) int { return strings.Compare(b.Name, a.Name) })
+	return out, nil
+}
+
+var errNotConfigured = errors.New("off-site backups are not set up")
+
+// Open returns the decrypted contents of a backup in the bucket. A wrong recovery key or a
+// damaged object shows up as a read error, so the caller must read to the end.
+func (m *Manager) Open(ctx context.Context, project, name string) (io.ReadCloser, error) {
+	c, ok, err := m.config(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errNotConfigured
+	}
+	b, err := m.open(c)
+	if err != nil {
+		return nil, err
+	}
+	return OpenObject(ctx, b, objectKey(project, name), c.RecoveryKey)
+}
+
+// OpenObject returns the decrypted contents of one object.
+func OpenObject(ctx context.Context, b Bucket, key string, recoveryKey []byte) (io.ReadCloser, error) {
+	obj, err := b.Get(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("get %s: %w", key, err)
+	}
+	pr, pw := io.Pipe()
+	go func() {
+		pw.CloseWithError(Decrypt(pw, obj, recoveryKey))
+		obj.Close()
+	}()
+	return pr, nil
 }

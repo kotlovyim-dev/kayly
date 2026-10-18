@@ -290,3 +290,17 @@ func TestOffsiteSetupValidatesAndHidesSecrets(t *testing.T) {
 		t.Fatalf("sync without a bucket should be a no-op, got %d", code)
 	}
 }
+
+func TestRestoreNeedsTheProjectNameAsConfirmation(t *testing.T) {
+	e := newEnv(t)
+	e.do(e.trusted, "POST", "/api/v1/projects", `{"name":"app"}`, "")
+	for _, body := range []string{
+		`{"name":"20260101T000000Z-daily.dump"}`,
+		`{"name":"20260101T000000Z-daily.dump","confirm":"other"}`,
+	} {
+		code, out := e.do(e.trusted, "POST", "/api/v1/projects/app/backups/restore", body, "")
+		if code != 400 || !strings.Contains(out, "confirm_required") {
+			t.Fatalf("%s: %d %s", body, code, out)
+		}
+	}
+}

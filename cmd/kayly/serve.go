@@ -131,6 +131,7 @@ func serve(args []string) error {
 			BackupDir:   p.backups(),
 			Notify:      notifier.Notify,
 			KeyFile:     p.key(),
+			Offsite:     uploader,
 		}, log)
 
 	if err := waitForSocket(ctx, p.caddySock(), time.Minute); err != nil {
@@ -192,6 +193,7 @@ func serve(args []string) error {
 			if err := uploader.Sync(ctx); err != nil {
 				log.Error("off-site sync", "err", err)
 			}
+			d.DrillIfDue(ctx)
 			select {
 			case <-ctx.Done():
 				return

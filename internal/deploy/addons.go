@@ -184,13 +184,13 @@ func (d *Deployer) startAddon(ctx context.Context, project string, a store.Addon
 	if err := d.rt.EnsureContainer(ctx, addonSpec(project, a)); err != nil || !wait {
 		return err
 	}
-	return d.waitAddonHealthy(ctx, project, a.Kind)
+	return d.waitContainerHealthy(ctx, AddonContainer(project, a.Kind))
 }
 
-func (d *Deployer) waitAddonHealthy(ctx context.Context, project, kind string) error {
+// waitContainerHealthy waits for a container with a healthcheck to report healthy.
+func (d *Deployer) waitContainerHealthy(ctx context.Context, name string) error {
 	ctx, cancel := context.WithTimeout(ctx, d.opt.HealthTimeout)
 	defer cancel()
-	name := AddonContainer(project, kind)
 	for {
 		c, err := d.rt.Inspect(ctx, name)
 		if err != nil {
@@ -201,7 +201,7 @@ func (d *Deployer) waitAddonHealthy(ctx context.Context, project, kind string) e
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("%s is %s after %s", kind, c.Health, d.opt.HealthTimeout)
+			return fmt.Errorf("%s is %s after %s", name, c.Health, d.opt.HealthTimeout)
 		case <-time.After(250 * time.Millisecond):
 		}
 	}

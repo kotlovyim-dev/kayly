@@ -346,9 +346,9 @@ func (r *Runtime) TagImage(ctx context.Context, src, dst string) error {
 	return nil
 }
 
-// Exec runs cmd inside a running container.
-func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, w io.Writer) (int, error) {
-	ex, err := r.c.ExecCreate(ctx, name, client.ExecCreateOptions{Cmd: cmd, AttachStdout: true, AttachStderr: true})
+// Exec runs cmd inside a running container, feeding it in (if not nil) as stdin.
+func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, in io.Reader, w io.Writer) (int, error) {
+	ex, err := r.c.ExecCreate(ctx, name, client.ExecCreateOptions{Cmd: cmd, AttachStdin: in != nil, AttachStdout: true, AttachStderr: true})
 	if err != nil {
 		return 0, fmt.Errorf("docker: exec in %s: %w", name, err)
 	}
@@ -357,6 +357,14 @@ func (r *Runtime) Exec(ctx context.Context, name string, cmd []string, w io.Writ
 		return 0, fmt.Errorf("docker: exec in %s: %w", name, err)
 	}
 	defer att.Close()
+	if in != nil {
+		go func() {
+			io.Copy(att.Conn, in)
+			if cw, ok := att.Conn.(interface{ CloseWrite() error }); ok {
+				cw.CloseWrite() // EOF for the command
+			}
+		}()
+	}
 	var stderr bytes.Buffer
 	if _, err := stdcopy.StdCopy(w, &stderr, att.Reader); err != nil {
 		return 0, fmt.Errorf("docker: exec in %s: %w", name, err)

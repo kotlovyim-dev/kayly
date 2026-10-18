@@ -59,8 +59,7 @@ func (d *Deployer) targets(ctx context.Context, p store.Project) ([]target, erro
 		case "postgres":
 			out = append(out, d.postgresTarget(p.Name))
 		case "redis":
-			out = append(out, d.execTarget(p.Name, a.Kind, "rdb",
-				"valkey-cli", "--no-auth-warning", "-a", a.Password, "--rdb", "-"))
+			out = append(out, d.execTarget(p.Name, a.Kind, "rdb", "sh", "-c", rdbSnapshot, a.Password))
 		}
 	}
 	if p.ActiveRelease == 0 {
@@ -86,6 +85,11 @@ func (d *Deployer) targets(ctx context.Context, p store.Project) ([]target, erro
 	return out, nil
 }
 
+// rdbSnapshot writes a snapshot with valkey-cli into a temporary file and prints it ($0 is the
+// password). `--rdb -` would append the replication stream's EOF marker, which an AOF base
+// file may not carry.
+const rdbSnapshot = `set -e; f=$(mktemp); trap 'rm -f "$f"' EXIT; valkey-cli --no-auth-warning -a "$0" --rdb "$f" >&2; cat "$f"`
+
 // execTarget streams the stdout of cmd, run in the add-on's container, into the backup file.
 func (d *Deployer) execTarget(project, addon, kind string, cmd ...string) target {
 	return target{kind: kind, dump: func(ctx context.Context, path string) error {
@@ -93,7 +97,7 @@ func (d *Deployer) execTarget(project, addon, kind string, cmd ...string) target
 		if err != nil {
 			return err
 		}
-		_, err = d.rt.Exec(ctx, AddonContainer(project, addon), cmd, f)
+		_, err = d.rt.Exec(ctx, AddonContainer(project, addon), cmd, nil, f)
 		if cerr := f.Close(); err == nil {
 			err = cerr
 		}
@@ -105,45 +109,49 @@ func (d *Deployer) execTarget(project, addon, kind string, cmd ...string) target
 // container writes straight into the backup directory.
 func (d *Deployer) volumeTarget(project, volume string) target {
 	return target{kind: "vol-" + volume + ".tar", dump: func(ctx context.Context, path string) error {
-		name := project + "_backup_" + volume
-		spec := Spec{
-			Name:  name,
-			Image: toolImage,
-			Cmd:   []string{"tar", "-C", "/data", "-cf", "/out/" + filepath.Base(path), "."},
-			Mounts: []Mount{
+		return d.runTool(ctx, project, project+"_backup_"+volume,
+			[]string{"tar", "-C", "/data", "-cf", "/out/" + filepath.Base(path), "."},
+			[]Mount{
 				{Volume: VolumeName(project, volume), Path: "/data", ReadOnly: true},
 				{Bind: filepath.Dir(path), Path: "/out"},
-			},
-			// The file was created by the daemon; root without this capability cannot open it.
-			CapAdd: []string{"DAC_OVERRIDE"},
-			Labels: labels(project, 0, RoleBackup, volume),
-		}
-		cctx := context.WithoutCancel(ctx)
-		if err := d.rt.Remove(cctx, name, 0); err != nil { // left over from a crash
-			return err
-		}
-		defer d.rt.Remove(cctx, name, 0)
-		if ok, err := d.rt.ImageExists(ctx, spec.Image); err != nil {
-			return err
-		} else if !ok {
-			if err := d.rt.PullImage(ctx, spec.Image); err != nil {
-				return err
-			}
-		}
-		if err := d.rt.Run(ctx, spec); err != nil {
-			return err
-		}
-		code, err := d.rt.Wait(ctx, name)
-		if err != nil {
-			return err
-		}
-		if code != 0 {
-			var out strings.Builder
-			d.rt.Logs(cctx, name, false, 5, &out)
-			return fmt.Errorf("tar exited %d: %s", code, strings.TrimSpace(out.String()))
-		}
-		return nil
+			})
 	}}
+}
+
+// runTool runs cmd to completion in a throwaway toolImage container named name and returns
+// its last output lines if it fails. The container may write files it does not own, so it
+// keeps the capabilities that root needs for that.
+func (d *Deployer) runTool(ctx context.Context, project, name string, cmd []string, mounts []Mount) error {
+	spec := Spec{
+		Name: name, Image: toolImage, Cmd: cmd, Mounts: mounts,
+		CapAdd: []string{"DAC_OVERRIDE", "CHOWN", "FOWNER"},
+		Labels: labels(project, 0, RoleBackup, ""),
+	}
+	cctx := context.WithoutCancel(ctx)
+	if err := d.rt.Remove(cctx, name, 0); err != nil { // left over from a crash
+		return err
+	}
+	defer d.rt.Remove(cctx, name, 0)
+	if ok, err := d.rt.ImageExists(ctx, spec.Image); err != nil {
+		return err
+	} else if !ok {
+		if err := d.rt.PullImage(ctx, spec.Image); err != nil {
+			return err
+		}
+	}
+	if err := d.rt.Run(ctx, spec); err != nil {
+		return err
+	}
+	code, err := d.rt.Wait(ctx, name)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		var out strings.Builder
+		d.rt.Logs(cctx, name, false, 5, &out)
+		return fmt.Errorf("%s exited %d: %s", cmd[0], code, strings.TrimSpace(out.String()))
+	}
+	return nil
 }
 
 // BackupNow backs up everything the project has: databases and volumes. It keeps going

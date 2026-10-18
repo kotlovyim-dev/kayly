@@ -64,6 +64,7 @@ func (s *Server) Handler(trusted bool) http.Handler {
 	mux.HandleFunc("DELETE /api/v1/projects/{project}/addons/{kind}", s.removeAddon)
 	mux.HandleFunc("GET /api/v1/projects/{project}/backups", s.listBackups)
 	mux.HandleFunc("POST /api/v1/projects/{project}/backups", s.createBackup)
+	mux.HandleFunc("POST /api/v1/projects/{project}/backups/restore", s.restoreBackup)
 	mux.HandleFunc("GET /api/v1/projects/{project}/backups/{name}", s.downloadBackup)
 	mux.HandleFunc("POST /api/v1/projects/{project}/deploys", s.deploy)
 	mux.HandleFunc("POST /api/v1/projects/{project}/rollback", s.rollback)
@@ -77,9 +78,11 @@ func (s *Server) Handler(trusted bool) http.Handler {
 	mux.HandleFunc("GET /api/v1/notifications", s.getNotifications)
 	mux.HandleFunc("PUT /api/v1/notifications", s.setNotifications)
 	mux.HandleFunc("POST /api/v1/notifications/test", s.testNotifications)
+	mux.HandleFunc("POST /api/v1/backups/kayly", s.backupKayly)
 	mux.HandleFunc("GET /api/v1/offsite", s.getOffsite)
 	mux.HandleFunc("PUT /api/v1/offsite", s.setOffsite)
 	mux.HandleFunc("POST /api/v1/offsite/sync", s.syncOffsite)
+	mux.HandleFunc("POST /api/v1/offsite/drill", s.drillOffsite)
 	if trusted {
 		mux.HandleFunc("GET /api/v1/tokens", s.listTokens)
 		mux.HandleFunc("POST /api/v1/tokens", s.createToken)
@@ -340,7 +343,13 @@ func (s *Server) listBackups(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.project(w, r); !ok {
 		return
 	}
-	bs, err := s.deployer.Backups(r.PathValue("project"))
+	var bs []deploy.Backup
+	var err error
+	if r.URL.Query().Get("remote") == "1" {
+		bs, err = s.deployer.RemoteBackups(r.Context(), r.PathValue("project"))
+	} else {
+		bs, err = s.deployer.Backups(r.PathValue("project"))
+	}
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -358,6 +367,47 @@ func (s *Server) createBackup(w http.ResponseWriter, r *http.Request) {
 		bs = []deploy.Backup{}
 	}
 	writeJSON(w, http.StatusCreated, bs)
+}
+
+// restoreBackup replaces live data with a backup. Like every destructive call it needs the
+// project's name as confirmation, so a script cannot do it by accident.
+func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
+	project := r.PathValue("project")
+	var body struct {
+		Name        string `json:"name"`
+		FromProject string `json:"from_project"`
+		Remote      bool   `json:"remote"`
+		Confirm     string `json:"confirm"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if body.Confirm != project {
+		writeError(w, http.StatusBadRequest, "confirm_required", "restoring replaces live data", "confirm with the project name: "+project)
+		return
+	}
+	stream := newStream(w)
+	err := s.deployer.Restore(context.WithoutCancel(r.Context()), project, body.Name,
+		deploy.RestoreSource{Project: body.FromProject, Remote: body.Remote}, stream)
+	stream.end(Result{OK: err == nil, Error: errString(err)})
+}
+
+// backupKayly snapshots Kayly's own database and key, e.g. before an upgrade.
+func (s *Server) backupKayly(w http.ResponseWriter, r *http.Request) {
+	b, err := s.deployer.SnapshotKayly(context.WithoutCancel(r.Context()), "manual")
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, b)
+}
+
+func (s *Server) drillOffsite(w http.ResponseWriter, r *http.Request) {
+	if err := s.deployer.Drill(context.WithoutCancel(r.Context())); err != nil {
+		writeError(w, http.StatusBadGateway, "drill_failed", err.Error(), "")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) downloadBackup(w http.ResponseWriter, r *http.Request) {

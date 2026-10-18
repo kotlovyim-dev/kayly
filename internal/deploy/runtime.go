@@ -37,9 +37,10 @@ type Runtime interface {
 	// it is left alone if it already runs that spec, replaced otherwise, and its image is
 	// pulled if missing.
 	EnsureContainer(ctx context.Context, spec Spec) error
-	// Exec runs cmd in a running container, streaming stdout to w, and returns its exit
-	// code. Stderr is returned in the error when the command fails.
-	Exec(ctx context.Context, name string, cmd []string, w io.Writer) (int, error)
+	// Exec runs cmd in a running container, feeding it in as stdin (nil for none) and
+	// streaming stdout to w, and returns its exit code. Stderr is returned in the error when
+	// the command fails.
+	Exec(ctx context.Context, name string, cmd []string, in io.Reader, w io.Writer) (int, error)
 	// RemoveVolume deletes a volume and its data. A missing volume is not an error.
 	RemoveVolume(ctx context.Context, name string) error
 }

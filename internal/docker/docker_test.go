@@ -215,3 +215,28 @@ func TestCmdReplacesEntrypoint(t *testing.T) {
 		}
 	}
 }
+
+func TestExecFeedsStdinAndReportsFailure(t *testing.T) {
+	r := newRuntime(t)
+	ctx := context.Background()
+	name := unique(t, "exec")
+	must(t, r.Run(ctx, deploy.Spec{Name: name, Image: testImage, Cmd: []string{"sleep", "60"}, Init: true, Restart: true}))
+	t.Cleanup(func() { r.Remove(ctx, name, 0) })
+
+	// More than one pipe buffer, so a missing EOF or a half-copied stream would show.
+	in := strings.Repeat("kayly\n", 50000)
+	var out bytes.Buffer
+	if _, err := r.Exec(ctx, name, []string{"cat"}, strings.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != in {
+		t.Fatalf("echoed %d bytes, want %d", out.Len(), len(in))
+	}
+	out.Reset()
+	if _, err := r.Exec(ctx, name, []string{"echo", "no stdin"}, nil, &out); err != nil || out.String() != "no stdin\n" {
+		t.Fatalf("without stdin: %q, %v", out.String(), err)
+	}
+	if code, err := r.Exec(ctx, name, []string{"sh", "-c", "echo oops >&2; exit 3"}, nil, &out); code != 3 || err == nil || !strings.Contains(err.Error(), "oops") {
+		t.Fatalf("failure: code %d, err %v", code, err)
+	}
+}

@@ -15,6 +15,13 @@ import (
 	"time"
 )
 
+// execRecord is one Exec call.
+type execRecord struct {
+	container string
+	cmd       []string
+	input     string // what was fed to stdin
+}
+
 // fakeRuntime is an in-memory container engine. A container's IP is its own name, so a
 // health probe can tell which container it hits.
 type fakeRuntime struct {
@@ -24,6 +31,7 @@ type fakeRuntime struct {
 	networks   map[string]bool
 	volumes    map[string]bool
 	removed    []string // every container name passed to Remove, in order
+	execs      []execRecord
 
 	// Failure injection, keyed by container name (or image for builds).
 	crashOnStart map[string]bool // starts, then is found exited with code 1
@@ -104,7 +112,7 @@ func (f *fakeRuntime) Run(_ context.Context, spec Spec) error {
 			return fmt.Errorf("no volume %s", m.Volume)
 		}
 	}
-	if spec.Labels[LabelRole] == RoleBackup {
+	if len(spec.Cmd) == 6 && spec.Cmd[0] == "tar" && spec.Cmd[3] == "-cf" {
 		// A volume backup: tar -C /data -cf /out/<file> .
 		for _, m := range spec.Mounts {
 			if m.Bind != "" {
@@ -323,7 +331,7 @@ func (f *fakeRuntime) EnsureContainer(ctx context.Context, spec Spec) error {
 }
 
 // Exec answers pg_dump with a fake dump.
-func (f *fakeRuntime) Exec(_ context.Context, name string, cmd []string, w io.Writer) (int, error) {
+func (f *fakeRuntime) Exec(_ context.Context, name string, cmd []string, in io.Reader, w io.Writer) (int, error) {
 	if err := f.call("Exec", name); err != nil {
 		return 1, err
 	}
@@ -333,6 +341,14 @@ func (f *fakeRuntime) Exec(_ context.Context, name string, cmd []string, w io.Wr
 	if !ok {
 		return 0, ErrNoContainer
 	}
+	var input string
+	if in != nil {
+		b, _ := io.ReadAll(in)
+		input = string(b)
+	}
+	f.mu.Lock()
+	f.execs = append(f.execs, execRecord{container: name, cmd: cmd, input: input})
+	f.mu.Unlock()
 	fmt.Fprintf(w, "dump of %s by %s", name, cmd[0])
 	return 0, nil
 }

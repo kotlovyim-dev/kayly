@@ -17,8 +17,14 @@ type Bucket interface {
 	Put(ctx context.Context, key string, r io.Reader, size int64) error
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, key string) error
-	// Keys returns every object key.
-	Keys(ctx context.Context) ([]string, error)
+	// List returns every object.
+	List(ctx context.Context) ([]ObjectInfo, error)
+}
+
+// ObjectInfo is a stored object's key and size.
+type ObjectInfo struct {
+	Key  string
+	Size int64
 }
 
 type s3Bucket struct {
@@ -69,13 +75,13 @@ func (b *s3Bucket) Delete(ctx context.Context, key string) error {
 	return b.c.RemoveObject(ctx, b.bucket, key, minio.RemoveObjectOptions{})
 }
 
-func (b *s3Bucket) Keys(ctx context.Context) ([]string, error) {
-	var keys []string
+func (b *s3Bucket) List(ctx context.Context) ([]ObjectInfo, error) {
+	var out []ObjectInfo
 	for o := range b.c.ListObjects(ctx, b.bucket, minio.ListObjectsOptions{Recursive: true}) {
 		if o.Err != nil {
 			return nil, o.Err
 		}
-		keys = append(keys, o.Key)
+		out = append(out, ObjectInfo{Key: o.Key, Size: o.Size})
 	}
-	return keys, nil
+	return out, nil
 }

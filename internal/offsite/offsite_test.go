@@ -1,6 +1,7 @@
 package offsite
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -139,10 +140,23 @@ func (b *memBucket) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-func (b *memBucket) Keys(context.Context) ([]string, error) {
+func (b *memBucket) List(context.Context) ([]ObjectInfo, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return slices.Sorted(maps.Keys(b.objs)), nil
+	var out []ObjectInfo
+	for _, k := range slices.Sorted(maps.Keys(b.objs)) {
+		out = append(out, ObjectInfo{Key: k, Size: int64(len(b.objs[k]))})
+	}
+	return out, nil
+}
+
+func (b *memBucket) keys() []string {
+	infos, _ := b.List(context.Background())
+	var out []string
+	for _, o := range infos {
+		out = append(out, o.Key)
+	}
+	return out
 }
 
 type memSettings map[string]string
@@ -202,7 +216,7 @@ func TestSyncUploadsEncryptedOnce(t *testing.T) {
 	if err := r.m.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
-	keys, _ := r.bucket.Keys(ctx)
+	keys := r.bucket.keys()
 	if !slices.Equal(keys, []string{"app/20260630T100000Z-manual.dump.enc"}) {
 		t.Fatalf("keys = %v", keys)
 	}
@@ -230,7 +244,7 @@ func TestSyncAppliesRetentionOnlyToBackups(t *testing.T) {
 	if err := r.m.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
-	keys, _ := r.bucket.Keys(ctx)
+	keys := r.bucket.keys()
 	if !slices.Equal(keys, []string{"app/notes.txt"}) {
 		t.Fatalf("keys = %v: the old backup should be gone and the stranger kept", keys)
 	}
@@ -271,5 +285,118 @@ func TestConfigureRejectsAnUnwritableBucket(t *testing.T) {
 	}
 	if st, _ := r.m.Status(context.Background()); st.Configured {
 		t.Fatal("a failed setup was saved")
+	}
+}
+
+func TestListAndOpenReadWhatSyncUploaded(t *testing.T) {
+	ctx := context.Background()
+	r := newRig(t)
+	r.configure(t)
+	r.backup(t, "app", "20260630T090000Z-daily.dump", "older")
+	r.backup(t, "app", "20260630T100000Z-manual.dump", "newer")
+	r.backup(t, "other", "20260630T100000Z-manual.dump", "not app's")
+	if err := r.m.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := r.m.Enabled(ctx); !ok {
+		t.Fatal("not enabled after setup")
+	}
+	list, err := r.m.List(ctx, "app")
+	if err != nil || len(list) != 2 || list[0].Name != "20260630T100000Z-manual.dump" || list[0].Size == 0 {
+		t.Fatalf("list = %+v, %v", list, err)
+	}
+	rc, err := r.m.Open(ctx, "app", list[0].Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+	if body, err := io.ReadAll(rc); err != nil || string(body) != "newer" {
+		t.Fatalf("open = %q, %v", body, err)
+	}
+	// A different recovery key is an error at the end of the stream, not silent garbage.
+	bad, err := OpenObject(ctx, r.bucket, "app/"+list[0].Name+".enc", bytes.Repeat([]byte{1}, KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadAll(bad); err == nil {
+		t.Fatal("a wrong key was accepted")
+	}
+}
+
+func TestRestoreServer(t *testing.T) {
+	ctx := context.Background()
+	key := bytes.Repeat([]byte{4}, KeySize)
+	b := &memBucket{objs: map[string][]byte{}}
+	put := func(name string, body []byte) {
+		var enc bytes.Buffer
+		if err := Encrypt(&enc, bytes.NewReader(body), key); err != nil {
+			t.Fatal(err)
+		}
+		b.objs[name+".enc"] = enc.Bytes()
+	}
+	archive := func(db string) []byte {
+		var buf bytes.Buffer
+		tw := tar.NewWriter(&buf)
+		for _, f := range [][2]string{{"kayly.db", db}, {"master.key", "KEY"}} {
+			tw.WriteHeader(&tar.Header{Name: f[0], Mode: 0o600, Size: int64(len(f[1]))})
+			tw.Write([]byte(f[1]))
+		}
+		tw.Close()
+		return buf.Bytes()
+	}
+	put("_kayly/20260101T000000Z-daily.kayly.tar", archive("old db"))
+	put("_kayly/20260102T000000Z-daily.kayly.tar", archive("new db"))
+	put("leryo/20260101T000000Z-daily.dump", []byte("old dump"))
+	put("leryo/20260102T000000Z-daily.dump", []byte("new dump"))
+	put("leryo/20260102T000000Z-daily.vol-uploads.tar", []byte("uploads"))
+	b.objs["leryo/readme.txt"] = []byte("not a backup")
+
+	data, backups := t.TempDir(), t.TempDir()
+	var said []string
+	if err := RestoreServer(ctx, b, key, data, backups, func(f string, a ...any) { said = append(said, fmt.Sprintf(f, a...)) }); err != nil {
+		t.Fatal(err)
+	}
+	read := func(parts ...string) string {
+		body, err := os.ReadFile(filepath.Join(parts...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+	if read(data, "kayly.db") != "new db" || read(data, "master.key") != "KEY" {
+		t.Fatal("the newest Kayly backup was not unpacked")
+	}
+	if read(backups, "leryo", "20260102T000000Z-daily.dump") != "new dump" ||
+		read(backups, "leryo", "20260102T000000Z-daily.vol-uploads.tar") != "uploads" {
+		t.Fatal("the newest backup of each kind was not downloaded")
+	}
+	if _, err := os.Stat(filepath.Join(backups, "leryo", "20260101T000000Z-daily.dump")); err == nil {
+		t.Error("an older dump was downloaded")
+	}
+	if fi, _ := os.Stat(filepath.Join(data, "master.key")); fi.Mode().Perm() != 0o600 {
+		t.Errorf("master.key mode = %v", fi.Mode())
+	}
+	// A second run must not overwrite the restored database.
+	if err := RestoreServer(ctx, b, key, data, backups, func(string, ...any) {}); err == nil {
+		t.Fatal("restored over an existing database")
+	}
+}
+
+func TestRestoreServerNeedsAKaylyBackupAndTheRightKey(t *testing.T) {
+	ctx := context.Background()
+	key := bytes.Repeat([]byte{4}, KeySize)
+	empty := &memBucket{objs: map[string][]byte{}}
+	if err := RestoreServer(ctx, empty, key, t.TempDir(), t.TempDir(), func(string, ...any) {}); err == nil {
+		t.Fatal("restored from an empty bucket")
+	}
+	var enc bytes.Buffer
+	Encrypt(&enc, bytes.NewReader([]byte("x")), key)
+	b := &memBucket{objs: map[string][]byte{"_kayly/20260102T000000Z-daily.kayly.tar.enc": enc.Bytes()}}
+	data := t.TempDir()
+	if err := RestoreServer(ctx, b, bytes.Repeat([]byte{5}, KeySize), data, t.TempDir(), func(string, ...any) {}); err == nil {
+		t.Fatal("restored with the wrong recovery key")
+	}
+	if _, err := os.Stat(filepath.Join(data, "kayly.db")); err == nil {
+		t.Fatal("a failed restore left a database behind")
 	}
 }

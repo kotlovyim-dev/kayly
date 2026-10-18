@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -43,9 +44,14 @@ Anywhere:
   kayly env ls | set KEY=value... | rm KEY... [-p project]
   kayly domains ls | add <hostname> <service> | rm <hostname> [-p project]
   kayly addons ls | add <postgres|redis> | rm <kind> [-p project]
-  kayly backups ls | create | get <name> [-p project]
+  kayly backups ls [-remote] | create | get <name> [-p project]
+  kayly backups restore <name|latest> [-remote] [-from project] [-p project]
+                                            replaces live data; asks for the project name first
   kayly backups setup <endpoint> <bucket> <access-key> [region]   off-site S3; the secret key comes on stdin
-  kayly backups status | sync
+  kayly backups status | sync | drill | kayly   kayly: snapshot Kayly's own database and key
+  kayly restore -endpoint E -bucket B -access-key K -recovery-key KEY [-region R]
+                                            on a new server, before starting the daemon: brings back
+                                            the database, key and newest backups; the secret key comes on stdin
   kayly notify ls | telegram <chat-id> | webhook <url> | off telegram|webhook | test
                                             telegram reads the bot token from stdin
 
@@ -65,6 +71,8 @@ func main() {
 		err = serve(args)
 	case "login":
 		err = login(args)
+	case "restore":
+		err = restoreServer(args)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -86,6 +94,8 @@ func runClientCommand(cmd string, args []string) error {
 	project := fs.String("p", "", "project (default: the current directory's name)")
 	follow := fs.Bool("f", false, "follow the output")
 	lines := fs.Int("n", 100, "number of lines")
+	remote := fs.Bool("remote", false, "backups: use the off-site bucket")
+	from := fs.String("from", "", "backups restore: the project the backup was taken from")
 	// Flags may come before or after positional arguments.
 	var pos []string
 	for {
@@ -201,7 +211,7 @@ func runClientCommand(cmd string, args []string) error {
 	case "addons":
 		return c.addons(ctx, proj, pos)
 	case "backups":
-		return c.backups(ctx, proj, pos)
+		return c.backups(ctx, proj, pos, *remote, *from)
 	case "env":
 		return c.env(ctx, proj, pos)
 	case "domains":
@@ -297,8 +307,8 @@ func (c *client) addons(ctx context.Context, proj func(string) (string, error), 
 	return errors.New("usage: kayly addons ls | add <postgres|redis> | rm <kind>")
 }
 
-func (c *client) backups(ctx context.Context, proj func(string) (string, error), pos []string) error {
-	if len(pos) > 0 && (pos[0] == "setup" || pos[0] == "status" || pos[0] == "sync") {
+func (c *client) backups(ctx context.Context, proj func(string) (string, error), pos []string, remote bool, from string) error {
+	if len(pos) > 0 && (pos[0] == "setup" || pos[0] == "status" || pos[0] == "sync" || pos[0] == "drill" || pos[0] == "kayly") {
 		return c.offsite(ctx, pos)
 	}
 	name, err := proj(".")
@@ -308,8 +318,8 @@ func (c *client) backups(ctx context.Context, proj func(string) (string, error),
 	base := "/api/v1/projects/" + name + "/backups"
 	switch {
 	case len(pos) == 0 || pos[0] == "ls":
-		var bs []deploy.Backup
-		if err := c.do(ctx, "GET", base, nil, &bs); err != nil {
+		bs, err := c.listBackups(ctx, base, remote)
+		if err != nil {
 			return err
 		}
 		tw := table()
@@ -330,6 +340,8 @@ func (c *client) backups(ctx context.Context, proj func(string) (string, error),
 			fmt.Printf("%s (%d KB)\n", b.Name, b.Size/1024)
 		}
 		return nil
+	case pos[0] == "restore" && len(pos) == 2:
+		return c.restore(ctx, name, pos[1], remote, from)
 	case pos[0] == "get" && len(pos) == 2:
 		resp, err := c.request(ctx, "GET", base+"/"+url.PathEscape(pos[1]), "", nil)
 		if err != nil {
@@ -350,7 +362,67 @@ func (c *client) backups(ctx context.Context, proj func(string) (string, error),
 		}
 		return f.Close()
 	}
-	return errors.New("usage: kayly backups ls | create | get <name>")
+	return errors.New("usage: kayly backups ls | create | get <name> | restore <name|latest> | setup | status | sync | drill")
+}
+
+func (c *client) listBackups(ctx context.Context, base string, remote bool) ([]deploy.Backup, error) {
+	if remote {
+		base += "?remote=1"
+	}
+	var bs []deploy.Backup
+	err := c.do(ctx, "GET", base, nil, &bs)
+	return bs, err
+}
+
+// restore replaces live data with a backup, after the owner types the project's name. "latest"
+// restores the newest backup of every kind, which is how a rebuilt server gets its data back.
+func (c *client) restore(ctx context.Context, project, name string, remote bool, from string) error {
+	source := project
+	if from != "" {
+		source = from
+	}
+	names := []string{name}
+	if name == "latest" {
+		bs, err := c.listBackups(ctx, "/api/v1/projects/"+source+"/backups", remote)
+		if err != nil {
+			return err
+		}
+		names = newestPerKind(bs)
+		if len(names) == 0 {
+			return errors.New("no backups to restore")
+		}
+	}
+	fmt.Printf("This replaces the live data of %s with:\n", project)
+	for _, n := range names {
+		fmt.Printf("  %s\n", n)
+	}
+	fmt.Print("A backup of what is replaced is taken first. Type the project name to confirm: ")
+	answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	if strings.TrimSpace(answer) != project {
+		return errors.New("not confirmed; nothing restored")
+	}
+	for _, n := range names {
+		body, _ := json.Marshal(map[string]any{"name": n, "from_project": from, "remote": remote, "confirm": project})
+		if err := c.stream(ctx, "/api/v1/projects/"+project+"/backups/restore", "application/json", bytes.NewReader(body)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// newestPerKind picks the newest backup of each kind (bs is newest first), leaving out
+// Kayly's own, which restores a whole server.
+func newestPerKind(bs []deploy.Backup) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, b := range bs {
+		kind := b.Name[strings.IndexByte(b.Name, '.')+1:]
+		if kind != "kayly.tar" && !seen[kind] {
+			seen[kind] = true
+			out = append(out, b.Name)
+		}
+	}
+	return out
 }
 
 func (c *client) offsite(ctx context.Context, pos []string) error {
@@ -372,6 +444,20 @@ func (c *client) offsite(ctx context.Context, pos []string) error {
 		return nil
 	case pos[0] == "sync" && len(pos) == 1:
 		return c.do(ctx, "POST", path+"/sync", nil, nil)
+	case pos[0] == "kayly" && len(pos) == 1:
+		var b deploy.Backup
+		if err := c.do(ctx, "POST", "/api/v1/backups/kayly", nil, &b); err != nil {
+			return err
+		}
+		fmt.Printf("%s (%d KB)\n", b.Name, b.Size/1024)
+		return nil
+	case pos[0] == "drill" && len(pos) == 1:
+		fmt.Println("restoring the newest off-site dump of every project into a throwaway database…")
+		if err := c.do(ctx, "POST", path+"/drill", nil, nil); err != nil {
+			return err
+		}
+		fmt.Println("drill passed")
+		return nil
 	case pos[0] == "setup" && (len(pos) == 4 || len(pos) == 5):
 		secretKey, err := bufio.NewReader(os.Stdin).ReadString('\n')
 		if secretKey = strings.TrimSpace(secretKey); secretKey == "" {
