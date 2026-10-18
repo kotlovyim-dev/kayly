@@ -50,6 +50,9 @@ type noProject struct{}
 
 func (noProject) projectName() string { return "" }
 
+// global marks the input of a tool that names no project.
+func (noProject) global() {}
+
 type toolInput interface{ projectName() string }
 
 // tools registers the tools tok may call on one MCP server.
@@ -73,8 +76,18 @@ func add[In toolInput, Out any](t *tools, name, scope, desc string, destructive 
 		func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 			var zero Out
 			project := in.projectName()
-			if msg, _ := denial(t.tok, scope, project, project == ""); msg != "" {
+			_, global := any(in).(interface{ global() })
+			if msg, _ := denial(t.tok, scope, project, global); msg != "" {
 				return nil, zero, errors.New(msg)
+			}
+			// Whatever the handler does with the name, it is the name of a project that exists.
+			if !global {
+				if project == "" {
+					return nil, zero, errors.New("project is required")
+				}
+				if _, err := t.s.store.Project(ctx, project); err != nil {
+					return nil, zero, err
+				}
 			}
 			if scope != store.ScopeRead {
 				if err := t.s.store.Audit(ctx, store.AuditEntry{Token: t.tok.Name, Action: "mcp " + name, Project: project}); err != nil {

@@ -210,3 +210,16 @@ func TestStartReleaseReportsTheReleaseAtOnce(t *testing.T) {
 		t.Errorf("after the pipeline fails: %+v, %v", out, err)
 	}
 }
+
+func TestMCPProjectToolsNeedARealProject(t *testing.T) {
+	e := newEnv(t)
+	e.do(e.trusted, "POST", "/api/v1/projects", `{"name":"app"}`, "")
+	cs := e.mcpSession(e.token(`{"name":"agent","scope":"deploy","project":"app"}`))
+	for _, args := range []map[string]any{{}, {"project": ""}, {"project": "ghost"}, {"project": "../app"}} {
+		for _, tool := range []string{"list_backups", "create_backup", "get_logs", "restart_service"} {
+			if res := call(t, cs, tool, args); !res.IsError {
+				t.Errorf("%s %v succeeded", tool, args)
+			}
+		}
+	}
+}
