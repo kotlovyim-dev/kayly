@@ -1,7 +1,8 @@
 import { type SubmitEvent, useState } from 'react';
-import type { Navigate } from './App';
+import { type Navigate, projectPath } from './App';
 import { api, type Project } from './api';
-import { Button, Command, ErrorNote, Lamp, SpikeStrip, TextInput, When } from './ui';
+import { modKey } from './palette';
+import { Button, Command, Kbd, Lamp, Pane, When } from './ui';
 
 export function ProjectsPage({
   projects,
@@ -12,64 +13,64 @@ export function ProjectsPage({
   navigate: Navigate;
   onCreated: () => Promise<void>;
 }) {
+  const live = projects?.filter((p) => p.live_release).length ?? 0;
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <h1 className="text-title font-bold">Projects</h1>
-        <CreateProject navigate={navigate} onCreated={onCreated} />
-      </div>
-      {projects === null ? (
-        <ListSkeleton />
-      ) : projects.length === 0 ? (
-        <FirstRun />
-      ) : (
-        <div className="overflow-hidden rounded-lg border border-rule bg-sheet">
-          <table className="w-full border-collapse text-left">
-            <thead className="sr-only">
-              <tr>
-                <th>Project</th>
-                <th>Live release</th>
-                <th>Since</th>
-              </tr>
-            </thead>
-            <tbody>
-              {projects.map((p) => (
-                <tr key={p.name} className="group border-b border-rule last:border-b-0 hover:bg-hover">
-                  <td className="p-0">
-                    <a
-                      href={'/p/' + encodeURIComponent(p.name)}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        navigate('/p/' + encodeURIComponent(p.name));
-                      }}
-                      className="flex h-12 items-center gap-3 px-4 font-semibold text-ink no-underline group-hover:underline"
-                    >
-                      <SpikeStrip name={p.name} />
-                      {p.name}
-                    </a>
-                  </td>
-                  <td className="px-4">
-                    {p.live_release ? (
-                      <span className="flex items-center gap-2">
-                        <Lamp state="live" />
-                        <span className="font-mono">r{p.live_release}</span>
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-2 text-ink-2">
-                        <Lamp state="off" />
-                        Not deployed
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 text-right text-meta text-ink-2 max-sm:hidden">
-                    {p.live_since ? <When at={p.live_since} /> : <>created <When at={p.created_at} /></>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <section className="shrink-0 border-b border-display-rule bg-display px-3 pt-3 pb-5 text-display-ink sm:px-5 sm:pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <h1 className="flex items-baseline gap-3">
+            <span className="text-title font-bold tracking-tight">Projects</span>
+            {projects && projects.length > 0 && (
+              <span className="text-meta text-display-ink-2">
+                {live} of {projects.length} live
+              </span>
+            )}
+          </h1>
+          <CreateProject navigate={navigate} onCreated={onCreated} />
         </div>
-      )}
+      </section>
+      <main className="min-h-0 flex-1 p-3 sm:p-5">
+        {projects === null ? (
+          <div aria-busy="true" aria-label="Loading projects" className="h-40 rounded-md border border-rule bg-surface" />
+        ) : projects.length === 0 ? (
+          <FirstRun />
+        ) : (
+          <Pane
+            id="all-projects"
+            title="All projects"
+            action={
+              <span className="flex items-center gap-1.5 text-meta text-ink-2 max-sm:hidden">
+                <Kbd>{modKey}K</Kbd> to jump
+              </span>
+            }
+            className="max-h-full"
+          >
+            <ul>
+              {projects.map((p) => (
+                <li key={p.name} className="border-b border-rule last:border-b-0">
+                  <a
+                    href={projectPath(p.name)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate(projectPath(p.name));
+                    }}
+                    className="grid min-h-12 grid-cols-[12px_minmax(0,1fr)_auto] items-center gap-x-4 px-4 text-ink no-underline transition-colors duration-150 hover:bg-hover sm:grid-cols-[12px_minmax(0,1fr)_8rem_10rem]"
+                  >
+                    <Lamp state={p.live_release ? 'live' : 'off'} />
+                    <span className="truncate font-semibold">{p.name}</span>
+                    <span className={`font-mono text-meta ${p.live_release ? '' : 'text-ink-2'}`}>
+                      {p.live_release ? `r${p.live_release}` : 'not deployed'}
+                    </span>
+                    <span className="text-right text-meta text-ink-2 max-sm:hidden">
+                      {p.live_since ? <When at={p.live_since} /> : <>created <When at={p.created_at} /></>}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </Pane>
+        )}
+      </main>
     </div>
   );
 }
@@ -86,7 +87,7 @@ function CreateProject({ navigate, onCreated }: { navigate: Navigate; onCreated:
     try {
       const p = await api.createProject(name.trim());
       await onCreated();
-      navigate('/p/' + encodeURIComponent(p.name));
+      navigate(projectPath(p.name));
     } catch (err) {
       setError(err);
       setBusy(false);
@@ -98,7 +99,7 @@ function CreateProject({ navigate, onCreated }: { navigate: Navigate; onCreated:
       <div className="flex gap-2">
         <label className="min-w-0 flex-1">
           <span className="sr-only">New project name</span>
-          <TextInput
+          <input
             value={name}
             onChange={(e) => setName(e.target.value.toLowerCase())}
             placeholder="new-project"
@@ -106,49 +107,40 @@ function CreateProject({ navigate, onCreated }: { navigate: Navigate; onCreated:
             title="Lowercase letters, digits and dashes, starting with a letter"
             required
             aria-invalid={error ? true : undefined}
-            className="w-56 font-mono max-sm:w-full"
+            className="h-9 w-56 rounded-[3px] border border-display-rule bg-display px-3 font-mono text-body text-display-ink transition-colors duration-150 placeholder:text-display-ink-2 hover:border-display-ink-2 focus:border-select focus:outline-none aria-[invalid=true]:border-fail max-sm:w-full"
           />
         </label>
-        <Button type="submit" variant="primary" busy={busy}>
+        <Button type="submit" variant="go" busy={busy}>
           Create project
         </Button>
       </div>
-      <ErrorNote error={error} />
+      {error ? (
+        <p role="alert" className="text-meta font-semibold text-fail">
+          {error instanceof Error ? error.message : String(error)}
+        </p>
+      ) : null}
     </form>
   );
 }
 
 function FirstRun() {
   return (
-    <div className="grid gap-4 rounded-lg border border-rule bg-sheet p-5 md:grid-cols-2 md:gap-8">
-      <div className="flex flex-col gap-2">
-        <h2 className="text-body font-bold">Set it up here first</h2>
-        <p className="max-w-[60ch] text-ink-2">
-          Create a project, attach Postgres or Redis, and set the values your app needs. Its first deploy then starts
-          with everything in place.
+    <div className="grid gap-3 sm:gap-5 md:grid-cols-2">
+      <Pane id="first-setup" title="Set it up here first">
+        <p className="max-w-[60ch] p-4 text-ink-2">
+          Create a project above, attach Postgres or Redis, and set the values your app needs. Its first deploy then
+          starts with everything in place.
         </p>
-      </div>
-      <div className="flex flex-col gap-2">
-        <h2 className="text-body font-bold">Or deploy straight away</h2>
-        <p className="max-w-[60ch] text-ink-2">
-          From the app's folder, next to its <code className="font-mono">kayly.toml</code>. Kayly lists any value it
-          still needs.
-        </p>
-        <Command>kayly deploy</Command>
-      </div>
-    </div>
-  );
-}
-
-function ListSkeleton() {
-  return (
-    <div aria-busy="true" aria-label="Loading projects" className="overflow-hidden rounded-lg border border-rule bg-sheet">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="flex h-12 items-center gap-3 border-b border-rule px-4 last:border-b-0">
-          <span className="h-[7px] w-[22px] rounded-[1px] bg-rule" />
-          <span className="h-3 w-32 rounded bg-rule motion-safe:animate-pulse" />
+      </Pane>
+      <Pane id="first-deploy" title="Or deploy straight away">
+        <div className="flex flex-col gap-3 p-4">
+          <p className="max-w-[60ch] text-ink-2">
+            From the app's folder, next to its <code className="font-mono text-ink">kayly.toml</code>. Kayly lists any
+            value it still needs.
+          </p>
+          <Command>kayly deploy</Command>
         </div>
-      ))}
+      </Pane>
     </div>
   );
 }

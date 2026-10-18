@@ -57,7 +57,7 @@ No logo, screenshots, testimonials or customer names exist. The two real apps (t
 
 1. The live release is sacred: the UI makes it obvious what is live, and nothing destructive happens without an explicit, specific confirmation.
 2. Show the next action, not the system: every state (empty, failed, missing value) says what to do next, often as the exact CLI command.
-3. Dense, quiet, fast: one screen per project, no decorative text, data first.
+3. Dense, quiet, fast: a project fits the window in three tabs (Overview, Logs, Settings) and the page never scrolls; no decorative text, data first.
 4. Honest about limits: when something is the CLI's job, say so plainly instead of hiding it.
 
 ## Accessibility & Inclusion

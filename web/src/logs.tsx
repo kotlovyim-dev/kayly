@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api } from './api';
-import { ErrorNote, Sheet } from './ui';
+import { ErrorNote, Pane } from './ui';
 
 // The output kept in the page; older lines scroll out so a chatty service cannot grow it forever.
 const MAX_CHARS = 200_000;
@@ -59,12 +59,14 @@ export function Logs({ name, services, releaseSeq }: { name: string; services: s
   }, [text, following]);
 
   return (
-    <Sheet
+    <Pane
       id="logs"
-      title="Logs"
+      title={following ? 'Logs · following' : 'Logs'}
+      scroll={false}
+      className="h-full max-lg:h-[calc(100dvh-14rem)]"
       action={
         services.length > 1 && (
-          <div role="tablist" aria-label="Service" className="flex rounded-md border border-rule p-0.5">
+          <div role="tablist" aria-label="Service" className="flex rounded-[3px] border border-rule p-0.5">
             {services.map((s) => (
               <button
                 key={s}
@@ -72,8 +74,8 @@ export function Logs({ name, services, releaseSeq }: { name: string; services: s
                 type="button"
                 aria-selected={s === service}
                 onClick={() => setService(s)}
-                className={`h-7 rounded px-2.5 text-meta font-semibold transition-colors duration-150 ${
-                  s === service ? 'bg-plate text-plate-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'
+                className={`h-7 rounded-[2px] px-2.5 text-meta font-semibold transition-colors duration-150 ${
+                  s === service ? 'bg-display text-display-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'
                 }`}
               >
                 {s}
@@ -98,11 +100,11 @@ export function Logs({ name, services, releaseSeq }: { name: string; services: s
             const el = e.currentTarget;
             setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
           }}
-          className="h-80 overflow-auto rounded-b-lg bg-code px-4 py-3 font-mono text-meta whitespace-pre-wrap text-ink"
+          className="min-h-0 flex-1 overflow-auto rounded-b-md bg-code px-4 py-3 font-mono text-meta whitespace-pre-wrap text-ink"
         >
           {text || `No output from ${service} yet.`}
         </pre>
       )}
-    </Sheet>
+    </Pane>
   );
 }

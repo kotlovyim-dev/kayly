@@ -1,16 +1,20 @@
-import { LogOut } from 'lucide-react';
+import { ChevronsUpDown, LogOut } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api, type Project } from './api';
-import { ProjectPage } from './project';
+import { Palette, modKey } from './palette';
+import { ProjectPage, type Tab } from './project';
 import { ProjectsPage } from './projects';
 import { SignIn } from './signin';
-import { Lamp } from './ui';
+import { Kbd, Lamp } from './ui';
 
 export type Navigate = (path: string) => void;
 
-function projectFromPath(path: string): string | null {
-  const m = /^\/p\/([^/]+)\/?$/.exec(path);
-  return m ? decodeURIComponent(m[1]) : null;
+export const projectPath = (name: string, tab: Tab = 'overview') =>
+  '/p/' + encodeURIComponent(name) + (tab === 'overview' ? '' : '/' + tab);
+
+function route(path: string): { project: string; tab: Tab } | null {
+  const m = /^\/p\/([^/]+)(?:\/(logs|settings))?\/?$/.exec(path);
+  return m ? { project: decodeURIComponent(m[1]), tab: (m[2] as Tab | undefined) ?? 'overview' } : null;
 }
 
 export function App() {
@@ -18,17 +22,28 @@ export function App() {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [signedOut, setSignedOut] = useState(false);
   const [loadError, setLoadError] = useState<unknown>(null);
+  const [palette, setPalette] = useState(false);
 
   const navigate: Navigate = useCallback((to) => {
     history.pushState(null, '', to);
     setPath(to);
-    window.scrollTo(0, 0);
   }, []);
 
   useEffect(() => {
     const onPop = () => setPath(location.pathname);
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPalette((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -42,70 +57,79 @@ export function App() {
     }
   }, []);
 
+  const current = route(path);
+  const project = current?.project;
   useEffect(() => {
     void loadProjects();
-  }, [loadProjects, path]);
+  }, [loadProjects, project]);
 
-  const current = projectFromPath(path);
   useEffect(() => {
-    document.title = current ? `${current} · kayly` : 'kayly';
-  }, [current]);
+    document.title = project ? `${project} · kayly` : 'kayly';
+  }, [project]);
 
   if (signedOut) return <SignIn onSignedIn={loadProjects} />;
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-10 bg-desk text-desk-ink">
-        <nav aria-label="Main" className="mx-auto flex h-12 max-w-[1440px] items-center gap-4 px-4 sm:px-6">
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <header className="shrink-0 bg-display text-display-ink">
+        <nav aria-label="Main" className="flex h-12 items-center gap-2 px-3 sm:px-5">
           <a
             href="/"
             onClick={(e) => {
               e.preventDefault();
               navigate('/');
             }}
-            className="flex items-center gap-2 rounded text-title font-bold tracking-tight text-desk-ink no-underline"
+            className="flex h-8 items-center gap-2 rounded-[3px] px-2 text-body font-bold tracking-tight text-display-ink no-underline hover:bg-display-hover"
           >
-            <Lamp state="live" size={14} />
+            <Lamp state="live" size={12} />
             kayly
           </a>
-          {current && projects && projects.length > 1 && (
-            <label className="flex min-w-0 items-center gap-2">
-              <span className="sr-only">Project</span>
-              <select
-                value={current}
-                onChange={(e) => navigate('/p/' + encodeURIComponent(e.target.value))}
-                className="h-8 min-w-0 cursor-pointer rounded-md border border-desk-ink/20 bg-desk px-2 text-body text-desk-ink hover:border-desk-ink/40"
-              >
-                {projects.map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+          <span aria-hidden="true" className="text-display-rule">
+            /
+          </span>
+          <button
+            type="button"
+            onClick={() => setPalette(true)}
+            aria-haspopup="dialog"
+            className="flex h-8 min-w-0 items-center gap-2 rounded-[3px] px-2 text-body text-display-ink transition-colors duration-150 hover:bg-display-hover"
+          >
+            <span className="truncate font-semibold">{project ?? 'Projects'}</span>
+            <ChevronsUpDown size={14} aria-hidden="true" className="shrink-0 text-display-ink-2" />
+            <Kbd className="text-display-ink-2 max-sm:hidden">{modKey}K</Kbd>
+          </button>
           <button
             type="button"
             onClick={() => void api.signOut().then(() => setSignedOut(true))}
-            className="ml-auto inline-flex h-8 items-center gap-2 rounded-md px-2 text-body text-desk-ink-2 transition-colors duration-150 hover:bg-desk-ink/10 hover:text-desk-ink"
+            className="ml-auto inline-flex h-8 items-center gap-2 rounded-[3px] px-2 text-body text-display-ink-2 transition-colors duration-150 hover:bg-display-hover hover:text-display-ink"
           >
-            <LogOut size={16} aria-hidden="true" />
+            <LogOut size={15} aria-hidden="true" />
             <span className="max-sm:sr-only">Sign out</span>
           </button>
         </nav>
       </header>
 
-      <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 pt-5 pb-12 sm:px-6">
-        {loadError ? (
+      {loadError ? (
+        <main className="p-5">
           <p role="alert" className="text-fail-ink">
-            Kayly did not answer: {loadError instanceof Error ? loadError.message : String(loadError)}. Reload to try again.
+            Kayly did not answer: {loadError instanceof Error ? loadError.message : String(loadError)}. Reload to try
+            again.
           </p>
-        ) : current ? (
-          <ProjectPage key={current} name={current} navigate={navigate} onChanged={loadProjects} />
-        ) : (
-          <ProjectsPage projects={projects} navigate={navigate} onCreated={loadProjects} />
-        )}
-      </main>
+        </main>
+      ) : current ? (
+        <ProjectPage key={current.project} name={current.project} tab={current.tab} navigate={navigate} onChanged={loadProjects} />
+      ) : (
+        <ProjectsPage projects={projects} navigate={navigate} onCreated={loadProjects} />
+      )}
+
+      {palette && (
+        <Palette
+          projects={projects ?? []}
+          current={current}
+          navigate={navigate}
+          onCreated={loadProjects}
+          onClose={() => setPalette(false)}
+        />
+      )}
     </div>
   );
 }

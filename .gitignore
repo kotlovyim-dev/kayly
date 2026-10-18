@@ -7,3 +7,4 @@ node_modules/
 /.impeccable/review/
 /.impeccable/live/
 /.impeccable/questions/
+/.playwright-mcp/

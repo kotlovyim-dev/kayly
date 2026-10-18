@@ -1,37 +1,21 @@
-import { Download, ExternalLink, Trash2 } from 'lucide-react';
-import { Fragment, type SubmitEvent, useCallback, useEffect, useRef, useState } from 'react';
-import type { Navigate } from './App';
-import {
-  ApiError,
-  api,
-  type Addon,
-  type AddonKind,
-  type Backup,
-  type ProjectDetail,
-  type Release,
-  type ReleaseStatus,
-  type StreamResult,
-} from './api';
+import { ExternalLink } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { type Navigate, projectPath } from './App';
+import { ApiError, api, type ProjectDetail, type Release, type ReleaseStatus, type StreamResult } from './api';
 import { Logs } from './logs';
-import {
-  Button,
-  Command,
-  CopyButton,
-  ErrorNote,
-  Field,
-  IconButton,
-  Lamp,
-  type LampState,
-  Select,
-  Sheet,
-  SpikeStrip,
-  StandbyGo,
-  TextInput,
-  When,
-  formatBytes,
-} from './ui';
+import { Overview } from './overview';
+import { Settings } from './settings';
+import { ArmGo, ErrorNote, Kbd, Lamp, When } from './ui';
 
-type Operation = {
+export type Tab = 'overview' | 'logs' | 'settings';
+
+const tabs: { id: Tab; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'logs', label: 'Logs' },
+  { id: 'settings', label: 'Settings' },
+];
+
+export type Operation = {
   title: string;
   log: string;
   result?: StreamResult;
@@ -59,22 +43,38 @@ function useProject(name: string) {
 
 export function ProjectPage({
   name,
+  tab,
   navigate,
   onChanged,
 }: {
   name: string;
+  tab: Tab;
   navigate: Navigate;
   onChanged: () => Promise<void>;
 }) {
   const { detail, error, reload } = useProject(name);
   const [op, setOp] = useState<Operation | null>(null);
-  const [arrived, setArrived] = useState<number | null>(null);
+  const [landed, setLanded] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number | null>(null);
   // Env values and add-ons reach running services only through a new release.
   const [pending, setPending] = useState(false);
+
+  // 1, 2 and 3 switch tabs when the keyboard is not busy with a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.metaKey || e.ctrlKey || e.altKey || t.closest('input, textarea, select, dialog')) return;
+      const next = tabs[Number(e.key) - 1];
+      if (next) navigate(projectPath(name, next.id));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [name, navigate]);
 
   const run = useCallback(
     async (title: string, start: (onLog: (t: string) => void) => Promise<StreamResult>, rollbackTo?: number) => {
       setOp({ title, log: '' });
+      navigate(projectPath(name));
       const before = Math.max(0, ...(detail?.releases.map((r) => r.seq) ?? []));
       let result: StreamResult;
       try {
@@ -96,18 +96,19 @@ export function ProjectPage({
       }
       setOp((o) => (o ? { ...o, result } : o));
       if (result.ok) {
-        setArrived(result.release ?? null);
+        setLanded(result.release ?? null);
+        setSelected(result.release ?? null);
         setPending(false);
       }
       await reload();
       await onChanged();
     },
-    [reload, onChanged, detail, name],
+    [reload, onChanged, detail, name, navigate],
   );
 
   if (error && !detail) {
     return (
-      <div className="flex flex-col gap-3">
+      <main className="flex flex-col gap-3 p-5">
         <ErrorNote error={error} />
         <a
           href="/"
@@ -115,81 +116,116 @@ export function ProjectPage({
             e.preventDefault();
             navigate('/');
           }}
-          className="text-action underline"
+          className="text-select-ink underline"
         >
           All projects
         </a>
-      </div>
+      </main>
     );
   }
   if (!detail) return <PageSkeleton />;
 
   const live = detail.releases.find((r) => r.status === 'live');
+  const shown = detail.releases.find((r) => r.seq === selected) ?? live ?? detail.releases[0];
   const changed = () => {
     setPending(Boolean(live));
     void reload();
   };
-  const redeploy = () => void run('Redeploy', (onLog) => api.redeploy(name, onLog));
+  const busy = Boolean(op && !op.result);
 
   return (
-    <div className="flex flex-col gap-5">
-      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
-        <div className="flex min-w-0 flex-col gap-2">
-          <h1 className="flex items-center gap-3 text-title font-bold">
-            <SpikeStrip name={name} />
-            {name}
-          </h1>
-          {live ? (
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <section aria-label="Live release" className="shrink-0 border-b border-display-rule bg-display px-3 pt-3 text-display-ink sm:px-5 sm:pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1.5">
+            <h1 className="text-title font-bold tracking-tight">{name}</h1>
+            {live ? (
               <p className="flex items-center gap-2.5">
-                <Lamp state="live" size={18} arrive={arrived === live.seq} />
-                <span className="font-mono text-cue font-bold tracking-tight">r{live.seq}</span>
-                <span className="text-meta text-ink-2">
+                <Lamp state="live" size={16} land={landed === live.seq} />
+                <span className="font-mono text-cue font-semibold tracking-tight">r{live.seq}</span>
+                <span className="text-meta text-display-ink-2">
                   live since <When at={live.created_at} />
                 </span>
               </p>
-              <ServiceLinks detail={detail} />
+            ) : (
+              <p className="flex items-center gap-2 text-display-ink-2">
+                <Lamp state="off" />
+                Not deployed yet
+              </p>
+            )}
+            <ServiceLinks detail={detail} />
+          </div>
+          {live && (
+            <div className="flex items-center gap-3 max-sm:w-full max-sm:flex-col max-sm:items-stretch">
+              {pending && <span className="text-meta text-display-ink-2">New values apply on redeploy</span>}
+              <ArmGo
+                label="Redeploy"
+                go={`Go: r${live.seq}'s image again`}
+                variant={pending ? 'go' : 'display'}
+                busy={busy}
+                onGo={() => void run('Redeploy', (onLog) => api.redeploy(name, onLog))}
+              />
             </div>
-          ) : (
-            <p className="flex items-center gap-2 text-ink-2">
-              <Lamp state="off" />
-              Not deployed yet
-            </p>
           )}
         </div>
-        {live && (
-          <div className="flex flex-col items-end gap-1.5 max-sm:w-full max-sm:items-stretch">
-            <StandbyGo
-              standby="Redeploy"
-              go={`Go: release r${live.seq}'s image again`}
-              variant={pending ? 'primary' : 'quiet'}
-              busy={Boolean(op && !op.result)}
-              onGo={redeploy}
-            />
-            {pending && <span className="text-meta text-ink-2">New values and add-ons apply on redeploy</span>}
-          </div>
-        )}
-      </header>
 
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
-        <div className="flex min-w-0 flex-col gap-5">
-          <Releases
-            name={name}
+        {detail.releases.length > 0 && (
+          <StepRow
             releases={detail.releases}
+            selected={shown?.seq}
+            landed={landed}
+            onSelect={(seq) => {
+              setSelected(seq);
+              navigate(projectPath(name));
+            }}
+          />
+        )}
+
+        <nav aria-label="Project" className="-mx-1 mt-2 flex gap-1">
+          {tabs.map((t, i) => (
+            <a
+              key={t.id}
+              href={projectPath(name, t.id)}
+              aria-current={t.id === tab ? 'page' : undefined}
+              onClick={(e) => {
+                e.preventDefault();
+                navigate(projectPath(name, t.id));
+              }}
+              className={`group flex h-10 items-center gap-2 border-b-2 px-2 text-body font-semibold no-underline transition-colors duration-150 ${
+                t.id === tab
+                  ? 'border-select text-display-ink'
+                  : 'border-transparent text-display-ink-2 hover:text-display-ink'
+              }`}
+            >
+              {t.label}
+              <Kbd className="text-display-ink-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 max-sm:hidden">
+                {i + 1}
+              </Kbd>
+            </a>
+          ))}
+        </nav>
+      </section>
+
+      <main className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5 lg:overflow-hidden">
+        {tab === 'overview' && (
+          <Overview
+            detail={detail}
+            shown={shown}
             op={op}
-            arrived={arrived}
+            busy={busy}
+            onSelect={setSelected}
             onDismiss={() => setOp(null)}
             onRollback={(seq) => void run(`Roll back to r${seq}`, (onLog) => api.rollback(name, seq, onLog), seq)}
           />
-          {live && <Logs name={name} services={detail.services.map((s) => s.name)} releaseSeq={live.seq} />}
-        </div>
-        <div className="flex min-w-0 flex-col gap-5">
-          <Addons name={name} addons={detail.addons} onChanged={changed} />
-          <Env name={name} keys={detail.env_keys} onChanged={changed} />
-          <Domains detail={detail} onChanged={() => void reload()} />
-          {detail.addons.some((a) => a.kind === 'postgres') && <Backups name={name} />}
-        </div>
-      </div>
+        )}
+        {tab === 'logs' &&
+          (live ? (
+            <Logs name={name} services={detail.services.map((s) => s.name)} releaseSeq={live.seq} />
+          ) : (
+            <p className="text-ink-2">Logs appear once a release is live.</p>
+          ))}
+        {tab === 'settings' && <Settings detail={detail} onChanged={changed} onDomainsChanged={() => void reload()} />}
+      </main>
     </div>
   );
 }
@@ -217,7 +253,7 @@ async function outcome(name: string, before: number, rollbackTo?: number): Promi
     if (next?.status === 'live' || next?.status === 'superseded') return { ok: true, release: next.seq };
     if (next?.status === 'failed') return { ok: false, release: next.seq, error: next.error };
   }
-  return { ok: false, unknown: true, error: 'Kayly did not answer in time. Check the releases below.' };
+  return { ok: false, unknown: true, error: 'Kayly did not answer in time. Check the releases list.' };
 }
 
 function ServiceLinks({ detail }: { detail: ProjectDetail }) {
@@ -227,15 +263,15 @@ function ServiceLinks({ detail }: { detail: ProjectDetail }) {
     <ul className="flex min-w-0 flex-wrap gap-x-4 gap-y-1">
       {links.map((s) => (
         <li key={s.name} className="flex min-w-0 items-center gap-1.5 text-meta">
-          {links.length > 1 && <span className="text-ink-2">{s.name}</span>}
+          {links.length > 1 && <span className="text-display-ink-2">{s.name}</span>}
           <a
             href={s.urls[0]}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex min-w-0 items-center gap-1 font-mono text-ink underline decoration-rule hover:decoration-ink"
+            className="inline-flex min-w-0 items-center gap-1 font-mono text-display-ink underline decoration-display-rule hover:decoration-display-ink"
           >
             <span className="truncate">{s.urls[0].replace(/^https:\/\//, '')}</span>
-            <ExternalLink size={13} aria-hidden="true" className="shrink-0 text-ink-2" />
+            <ExternalLink size={12} aria-hidden="true" className="shrink-0 text-display-ink-2" />
           </a>
         </li>
       ))}
@@ -243,7 +279,7 @@ function ServiceLinks({ detail }: { detail: ProjectDetail }) {
   );
 }
 
-const statusWord: Record<ReleaseStatus, string> = {
+export const statusWord: Record<ReleaseStatus, string> = {
   live: 'Live',
   superseded: 'Previous',
   failed: 'Failed',
@@ -252,600 +288,96 @@ const statusWord: Record<ReleaseStatus, string> = {
   starting: 'Starting',
 };
 
-function lampFor(s: ReleaseStatus): LampState {
-  if (s === 'live' || s === 'failed' || s === 'superseded') return s;
-  return 'standby';
+/** The cell's mark: the same shape language as the lamps, drawn as a step. */
+function stepLook(r: Release) {
+  switch (r.status) {
+    case 'live':
+      return 'border-live bg-live';
+    case 'failed':
+      return 'border-fail bg-fail';
+    case 'superseded':
+      return r.can_roll_back ? 'border-display-ink-2' : 'border-display-ink-2/30';
+    default:
+      return 'border-busy light-blink';
+  }
 }
 
-/** The cue sheet: every release with its lamp, the live one reversed out on a plate. */
-function Releases({
-  name,
+// How many steps fit: the newest ones; older releases stay in the Overview list.
+const stepFit =
+  'max-sm:[&:nth-last-child(n+13)]:hidden max-lg:[&:nth-last-child(n+25)]:hidden max-xl:[&:nth-last-child(n+37)]:hidden';
+
+/**
+ * The release sequence: one step per release, oldest to newest, the live one lit. Selecting a
+ * step opens it in Overview. Arrow keys move along the row.
+ */
+function StepRow({
   releases,
-  op,
-  arrived,
-  onDismiss,
-  onRollback,
+  selected,
+  landed,
+  onSelect,
 }: {
-  name: string;
   releases: Release[];
-  op: Operation | null;
-  arrived: number | null;
-  onDismiss: () => void;
-  onRollback: (seq: number) => void;
+  selected?: number;
+  landed: number | null;
+  onSelect: (seq: number) => void;
 }) {
-  const busy = Boolean(op && !op.result);
+  const steps = [...releases].sort((a, b) => a.seq - b.seq).slice(-48);
   return (
-    <Sheet id="releases" title="Releases">
-      {op && <OperationLog op={op} onDismiss={onDismiss} />}
-      {releases.length === 0 ? (
-        <div className="flex flex-col gap-3 p-4">
-          <p className="max-w-[62ch] text-ink-2">
-            Deploy from the app's folder, next to its <code className="font-mono text-ink">kayly.toml</code>. Values
-            and add-ons set here are ready for it.
-          </p>
-          <Command>{`kayly deploy -p ${name}`}</Command>
-        </div>
-      ) : (
-        <table className="w-full border-collapse text-left">
-          <thead>
-            <tr className="border-b border-rule text-meta text-ink-2">
-              <th scope="col" className="w-0 py-2 pr-2.5 pl-4 font-normal">
-                <span className="sr-only">State</span>
-              </th>
-              <th scope="col" className="py-2 pr-3 font-semibold">
-                Release
-              </th>
-              <th scope="col" className="py-2 pr-3 font-semibold max-sm:hidden">
-                When
-              </th>
-              <th scope="col" className="w-full py-2 pr-3 font-semibold">
-                Status
-              </th>
-              <th scope="col" className="py-2 pr-4">
-                <span className="sr-only">Action</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {releases.map((r) => {
-              const isLive = r.status === 'live';
-              return (
-                <tr
-                  key={r.seq}
-                  className={
-                    isLive
-                      ? 'bg-plate text-plate-ink'
-                      : 'border-b border-rule last:border-b-0 hover:bg-hover'
-                  }
-                >
-                  <td className="py-2.5 pr-2.5 pl-4 align-top">
-                    <span className="flex h-5 items-center">
-                      <Lamp state={lampFor(r.status)} arrive={isLive && arrived === r.seq} />
-                    </span>
-                  </td>
-                  <td className="py-2.5 pr-3 align-top">
-                    <span className="font-mono font-semibold">r{r.seq}</span>
-                    <span className={`block text-meta whitespace-nowrap sm:hidden ${isLive ? 'text-plate-ink-2' : 'text-ink-2'}`}>
-                      <When at={r.created_at} />
-                    </span>
-                  </td>
-                  <td
-                    className={`py-2.5 pr-3 align-top text-meta whitespace-nowrap max-sm:hidden ${isLive ? 'text-plate-ink-2' : 'text-ink-2'}`}
-                  >
-                    <span className="flex h-5 items-center">
-                      <When at={r.created_at} />
-                    </span>
-                  </td>
-                  <td className="min-w-0 py-2.5 pr-3 align-top">
-                    <span
-                      className={
-                        r.status === 'failed'
-                          ? 'font-semibold text-fail-ink'
-                          : r.status === 'superseded'
-                            ? 'text-ink-2'
-                            : 'font-semibold'
-                      }
-                    >
-                      {statusWord[r.status]}
-                    </span>
-                    {r.error && <FailureReason error={r.error} />}
-                  </td>
-                  <td className="py-1.5 pr-4 text-right align-top">
-                    {r.status === 'superseded' &&
-                      (r.can_roll_back ? (
-                        <StandbyGo
-                          small
-                          standby="Roll back"
-                          go={`Go: r${r.seq} live`}
-                          busy={false}
-                          onGo={() => !busy && onRollback(r.seq)}
-                        />
-                      ) : (
-                        <span className="flex h-8 items-center justify-end text-meta whitespace-nowrap text-ink-2">
-                          image pruned
-                        </span>
-                      ))}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </Sheet>
-  );
-}
-
-function FailureReason({ error }: { error: string }) {
-  const [first, ...rest] = error.split('\n');
-  return (
-    <span className="block text-meta text-ink-2">
-      <Inline text={first} />
-      {rest.length > 0 && (
-        <details className="mt-1">
-          <summary className="cursor-pointer text-ink">Full message</summary>
-          <pre className="mt-1 max-h-48 overflow-auto font-mono whitespace-pre-wrap">{rest.join('\n')}</pre>
-        </details>
-      )}
-    </span>
-  );
-}
-
-/** Renders `quoted` spans of Kayly's messages as commands that never wrap mid-token. */
-function Inline({ text }: { text: string }) {
-  return (
-    <>
-      {text.split('`').map((part, i) =>
-        i % 2 === 1 ? (
-          <code key={i} className="font-mono text-ink">
-            {/* Lines break between words only, never after a hyphen inside a flag. */}
-            {part.split(' ').map((word, j) => (
-              <Fragment key={j}>
-                {j > 0 && ' '}
-                <span className="whitespace-nowrap">{word}</span>
-              </Fragment>
-            ))}
-          </code>
-        ) : (
-          part
-        ),
-      )}
-    </>
-  );
-}
-
-/** Live output of a redeploy or rollback while it runs, and its outcome after. */
-function OperationLog({ op, onDismiss }: { op: Operation; onDismiss: () => void }) {
-  const ref = useRef<HTMLPreElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [op.log]);
-  const state: LampState = !op.result ? 'standby' : op.result.ok ? 'live' : 'failed';
-  return (
-    <div className="border-b border-rule">
-      <div className="flex min-h-11 items-center gap-3 px-4 py-2">
-        <Lamp state={state} />
-        <p className="min-w-0 flex-1 font-semibold" aria-live="polite">
-          {!op.result
-            ? `${op.title}: standing by`
-            : op.result.ok
-              ? `${op.title}: r${op.result.release} is live`
-              : op.result.unknown
-                ? `${op.title}: result unknown`
-                : `${op.title} failed. The live release kept serving.`}
-        </p>
-        {op.result && (
-          <Button variant="quiet" onClick={onDismiss} className="h-8 px-2.5 text-meta">
-            Close
-          </Button>
-        )}
-      </div>
-      {op.result && !op.result.ok && op.result.error && (
-        <p className="px-4 pb-2 text-meta font-semibold text-fail-ink">{op.result.error}</p>
-      )}
-      <pre
-        ref={ref}
-        tabIndex={0}
-        aria-label={`${op.title} output`}
-        className="max-h-72 overflow-auto bg-code px-4 py-3 font-mono text-meta whitespace-pre-wrap text-ink"
-      >
-        {op.log.replace(/^\n+/, '') || 'Waiting for the first line…'}
-      </pre>
-    </div>
-  );
-}
-
-const addonInfo: Record<AddonKind, { label: string; gives: string }> = {
-  postgres: { label: 'Postgres', gives: 'DATABASE_URL' },
-  redis: { label: 'Redis', gives: 'REDIS_URL' },
-};
-
-function addonLamp(a: Addon): LampState {
-  if (a.status === 'healthy') return 'live';
-  if (a.status === 'starting') return 'standby';
-  return 'failed';
-}
-
-function Addons({ name, addons, onChanged }: { name: string; addons: Addon[]; onChanged: () => void }) {
-  return (
-    <Sheet quiet id="addons" title="Add-ons">
-      <ul>
-        {(['postgres', 'redis'] as const).map((kind) => {
-          const a = addons.find((x) => x.kind === kind);
-          return (
-            <li key={kind} className="border-b border-rule last:border-b-0">
-              {a ? (
-                <AttachedAddon name={name} addon={a} onChanged={onChanged} />
-              ) : (
-                <AvailableAddon name={name} kind={kind} onChanged={onChanged} />
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </Sheet>
-  );
-}
-
-function AvailableAddon({ name, kind, onChanged }: { name: string; kind: AddonKind; onChanged: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const info = addonInfo[kind];
-  return (
-    <div className="flex flex-col gap-2 px-4 py-3">
-      <div className="flex items-center gap-3">
-        <Lamp state="off" />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold">{info.label}</p>
-          <p className="text-meta text-ink-2">
-            Services get <code className="font-mono">{info.gives}</code>
-          </p>
-        </div>
-        <Button
-          busy={busy}
-          onClick={async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              await api.addAddon(name, kind);
-              onChanged();
-            } catch (e) {
-              setError(e);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {busy ? 'Starting' : `Add ${info.label}`}
-        </Button>
-      </div>
-      <ErrorNote error={error} />
-    </div>
-  );
-}
-
-function AttachedAddon({ name, addon, onChanged }: { name: string; addon: Addon; onChanged: () => void }) {
-  const [removing, setRemoving] = useState(false);
-  const [confirm, setConfirm] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const info = addonInfo[addon.kind];
-
-  async function remove(e: SubmitEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api.removeAddon(name, addon.kind);
-      onChanged();
-    } catch (err) {
-      setError(err);
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-3 px-4 py-3">
-      <div className="flex items-center gap-3">
-        <Lamp state={addonLamp(addon)} />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold">
-            {info.label} <span className="font-normal text-ink-2">{addon.status}</span>
-          </p>
-          <p className="text-meta text-ink-2">
-            <code className="font-mono">{addon.env_var}</code> since <When at={addon.created_at} />
-          </p>
-        </div>
-        <CopyButton text={addon.url} label={`Copy ${addon.env_var}`} />
-        <IconButton label={`Remove ${info.label}`} onClick={() => setRemoving((v) => !v)} aria-expanded={removing}>
-          <Trash2 size={16} />
-        </IconButton>
-      </div>
-      {removing && (
-        <form onSubmit={remove} className="flex flex-col gap-2 rounded-md border border-fail/40 p-3">
-          <p className="text-meta">
-            This deletes {info.label} and all its data. Backups stay. Type <strong className="font-mono">{name}</strong> to
-            confirm.
-          </p>
-          <div className="flex gap-2">
-            <label className="min-w-0 flex-1">
-              <span className="sr-only">Project name</span>
-              <TextInput value={confirm} onChange={(e) => setConfirm(e.target.value)} className="font-mono" autoFocus />
-            </label>
-            <Button type="submit" variant="danger" busy={busy} disabled={confirm !== name}>
-              Delete {info.label}
-            </Button>
-          </div>
-          <ErrorNote error={error} />
-        </form>
-      )}
-    </div>
-  );
-}
-
-function Env({ name, keys, onChanged }: { name: string; keys: string[]; onChanged: () => void }) {
-  const [key, setKey] = useState('');
-  const [value, setValue] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-
-  async function submit(e: SubmitEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await api.setEnv(name, key, value);
-      setKey('');
-      setValue('');
-      onChanged();
-    } catch (err) {
-      setError(err);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Sheet quiet id="env" title="Env values">
-      {keys.length > 0 && (
-        <ul>
-          {keys.map((k) => (
-            <li key={k} className="flex min-h-11 items-center gap-2 border-b border-rule px-4">
-              <code className="min-w-0 flex-1 truncate font-mono text-meta">{k}</code>
-              <StandbyGo
-                small
-                standby="Delete"
-                go="Go: delete"
-                onGo={() => void api.deleteEnv(name, k).then(onChanged, setError)}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-      <form onSubmit={submit} className="flex flex-col gap-3 p-4">
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2">
-          <Field label="Key">
-            <TextInput
-              value={key}
-              onChange={(e) => setKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
-              placeholder="API_KEY"
-              required
-              className="font-mono"
-            />
-          </Field>
-          <Field label="Value">
-            <TextInput
-              type="password"
-              autoComplete="off"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              className="font-mono"
-            />
-          </Field>
-        </div>
-        <ErrorNote error={error} />
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-meta text-ink-2">Stored encrypted, never shown again.</span>
-          <Button type="submit" busy={busy}>
-            Set value
-          </Button>
-        </div>
-      </form>
-    </Sheet>
-  );
-}
-
-function Domains({ detail, onChanged }: { detail: ProjectDetail; onChanged: () => void }) {
-  const services = detail.services.filter((s) => s.port);
-  const [host, setHost] = useState('');
-  const [service, setService] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const [added, setAdded] = useState<string | null>(null);
-
-  async function submit(e: SubmitEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const d = await api.addDomain(detail.name, host.trim(), service || services[0].name);
-      setAdded(d.hostname);
-      setHost('');
-      onChanged();
-    } catch (err) {
-      setError(err);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Sheet quiet id="domains" title="Domains">
-      {detail.domains.length > 0 && (
-        <ul>
-          {detail.domains.map((d) => (
-            <li key={d.hostname} className="flex min-h-11 items-center gap-2 border-b border-rule px-4">
-              <a
-                href={`https://${d.hostname}`}
-                target="_blank"
-                rel="noreferrer"
-                className="min-w-0 flex-1 truncate font-mono text-meta text-ink underline decoration-rule hover:decoration-ink"
-              >
-                {d.hostname}
-              </a>
-              <span className="text-meta text-ink-2">{d.service}</span>
-              <StandbyGo
-                small
-                standby="Remove"
-                go="Go: remove"
-                onGo={() => void api.removeDomain(detail.name, d.hostname).then(onChanged, setError)}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-      {services.length === 0 ? (
-        <p className="p-4 text-meta text-ink-2">Domains point at a service with a port. Deploy one first.</p>
-      ) : (
-        <form onSubmit={submit} className="flex flex-col gap-3 p-4">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-            <Field label="Hostname">
-              <TextInput
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                placeholder="app.example.com"
-                required
-                className="font-mono"
-              />
-            </Field>
-            <Field label="Service">
-              <Select value={service || services[0].name} onChange={(e) => setService(e.target.value)}>
-                {services.map((s) => (
-                  <option key={s.name}>{s.name}</option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          <ErrorNote error={error} />
-          {added && (
-            <p className="text-meta text-ink-2" aria-live="polite">
-              Point the A record of <span className="font-mono text-ink">{added}</span> at this server. HTTPS follows
-              once DNS resolves.
-            </p>
-          )}
-          <div className="flex justify-end">
-            <Button type="submit" busy={busy}>
-              Add domain
-            </Button>
-          </div>
-        </form>
-      )}
-    </Sheet>
-  );
-}
-
-/** "20261017T154007Z-before-r3.dump" → "before r3". */
-function backupReason(b: Backup) {
-  const m = /-([a-z0-9-]+)\.dump$/.exec(b.name);
-  return m ? m[1].replace('-', ' ') : '';
-}
-
-const SHOWN_BACKUPS = 5;
-
-function Backups({ name }: { name: string }) {
-  const [list, setList] = useState<Backup[] | null>(null);
-  const [showAll, setShowAll] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const load = useCallback(() => api.backups(name).then(setList, setError), [name]);
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  return (
-    <Sheet
-      quiet
-      id="backups"
-      title="Database backups"
-      action={
-        <Button
-          busy={busy}
-          className="h-8 px-2.5 text-meta"
-          onClick={async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              await api.createBackup(name);
-              await load();
-            } catch (e) {
-              setError(e);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          Back up now
-        </Button>
-      }
+    <ol
+      aria-label="Releases, oldest to newest"
+      className="mt-4 flex gap-1"
+      onKeyDown={(e) => {
+        const i = steps.findIndex((r) => r.seq === selected);
+        const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+        const next = steps[i + d];
+        if (!d || !next) return;
+        e.preventDefault();
+        onSelect(next.seq);
+        (e.currentTarget.querySelector(`[data-seq="${next.seq}"]`) as HTMLElement | null)?.focus();
+      }}
     >
-      {error ? (
-        <div className="p-4">
-          <ErrorNote error={error} />
-        </div>
-      ) : null}
-      {list && list.length === 0 && (
-        <p className="p-4 text-meta text-ink-2">Kayly backs up Postgres daily and before every release step.</p>
-      )}
-      {list && list.length > 0 && (
-        <ul>
-          {(showAll ? list : list.slice(0, SHOWN_BACKUPS)).map((b) => (
-            <li key={b.name} className="flex min-h-11 items-center gap-3 border-b border-rule pr-2.5 pl-4 last:border-b-0">
-              <span className="min-w-0 flex-1">
-                <span className="block text-body">
-                  <When at={b.created_at} />
-                </span>
-                <span className="flex gap-3 text-meta text-ink-2">
-                  <span>{backupReason(b)}</span>
-                  <span>{formatBytes(b.size)}</span>
-                </span>
-              </span>
-              <a
-                href={api.backupURL(name, b.name)}
-                download
-                aria-label={`Download backup from ${new Date(b.created_at).toLocaleString()}`}
-                title="Download"
-                className="inline-flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
-              >
-                <Download size={16} />
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-      {list && list.length > SHOWN_BACKUPS && (
-        <div className="px-4 py-2">
-          <button
-            type="button"
-            onClick={() => setShowAll((v) => !v)}
-            aria-expanded={showAll}
-            className="h-8 rounded-md text-meta font-semibold text-ink underline decoration-rule underline-offset-4 hover:decoration-ink"
-          >
-            {showAll ? 'Show the newest' : `Show all (${list.length})`}
-          </button>
-        </div>
-      )}
-    </Sheet>
+      {steps.map((r) => {
+        const isSelected = r.seq === selected;
+        return (
+          <li key={r.seq} className={`flex w-6 flex-col items-center gap-1 ${stepFit}`}>
+            <button
+              type="button"
+              data-seq={r.seq}
+              tabIndex={isSelected ? 0 : -1}
+              aria-current={isSelected || undefined}
+              aria-label={`r${r.seq}, ${statusWord[r.status]}`}
+              title={`r${r.seq} · ${statusWord[r.status]}`}
+              onClick={() => onSelect(r.seq)}
+              className={`relative size-6 rounded-[3px] border-2 transition-[outline-color] duration-150 hover:outline hover:outline-1 hover:outline-offset-2 hover:outline-display-ink-2 ${stepLook(r)} ${
+                isSelected ? 'outline outline-2 outline-offset-2 !outline-select' : ''
+              } ${r.status === 'live' && landed === r.seq ? 'light-land' : ''}`}
+            >
+              {r.status === 'failed' && (
+                <svg viewBox="0 0 20 20" aria-hidden="true" className="absolute inset-0 size-full">
+                  <path d="M5 15 15 5" stroke="var(--k-display)" strokeWidth="2.5" strokeLinecap="round" />
+                </svg>
+              )}
+            </button>
+            <span
+              aria-hidden="true"
+              className={`font-mono text-meta ${isSelected || r.status === 'live' ? 'text-display-ink' : 'text-display-ink-2'}`}
+            >
+              {r.seq}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
 function PageSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Loading project" className="flex flex-col gap-5">
-      <div className="h-16 w-72 rounded-lg bg-rule/60 motion-safe:animate-pulse" />
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
-        <div className="h-72 rounded-lg border border-rule bg-sheet" />
-        <div className="h-72 rounded-lg border border-rule bg-sheet" />
+    <div aria-busy="true" aria-label="Loading project" className="flex min-h-0 flex-1 flex-col">
+      <div className="h-40 shrink-0 bg-display" />
+      <div className="grid flex-1 gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="rounded-md border border-rule bg-surface" />
+        <div className="rounded-md border border-rule bg-surface max-lg:hidden" />
       </div>
     </div>
   );

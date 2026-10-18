@@ -22,14 +22,13 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <div className="h-12 bg-desk" aria-hidden="true" />
-      <main className="mx-auto flex w-full max-w-[400px] flex-1 flex-col justify-center gap-8 px-4 pb-24">
-        <h1 className="flex items-center gap-2.5 text-cue font-bold tracking-tight">
-          <Lamp state="live" size={22} />
+    <main className="flex h-dvh items-center justify-center overflow-hidden p-4">
+      <div className="w-full max-w-[400px] overflow-hidden rounded-md border border-rule bg-surface">
+        <h1 className="flex items-center gap-2.5 bg-display px-5 py-6 text-cue font-bold tracking-tight text-display-ink">
+          <Lamp state="live" size={18} />
           kayly
         </h1>
-        <form onSubmit={submit} className="flex flex-col gap-4">
+        <form onSubmit={submit} className="flex flex-col gap-4 p-5">
           <Field label="API token">
             <TextInput
               type="password"
@@ -44,15 +43,15 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
             />
           </Field>
           <ErrorNote error={error} />
-          <Button variant="primary" type="submit" busy={busy}>
+          <Button variant="go" type="submit" busy={busy}>
             Sign in
           </Button>
         </form>
-        <div className="flex flex-col gap-2 text-meta text-ink-2">
+        <div className="flex flex-col gap-2 border-t border-rule p-5 text-meta text-ink-2">
           <p>No token yet? Create one on the server:</p>
           <Command>sudo kayly token create browser</Command>
         </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }

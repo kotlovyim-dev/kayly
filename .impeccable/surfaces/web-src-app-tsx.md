@@ -13,16 +13,18 @@ Audience and job: open-source self-hosters on a laptop setting up and configurin
 
 Constraints: kayly.toml and source upload are the CLI's job; the UI says so with the exact command. Env values are write-only. Removing an add-on requires typing the project name. No external requests (fonts bundled). WCAG 2.2 AA, light and dark.
 
+Owner decisions (2026-10-17): the window never scrolls; every view fits the viewport and only long content (release history, logs, backups) scrolls inside its own pane. A project has three tabs: Overview, Logs, Settings (add-ons, env, domains, backups on one fitted screen). Projects are switched from a top-bar switcher and a ⌘K palette; no sidebar rail. Minimal and modern.
+
 ## Direction contract
 
-THESIS: Every release is a cue in a stage manager's prompt book: it stands by until it proves itself, then goes, and the previous one bows out. Refuses the category default of a dark sidebar dashboard with a grid of project cards.
+THESIS: Kayly as a small, exact instrument: one black display, colour keys, every release a step in the sequence. Refuses the dark-neutral Vercel clone and the sidebar-plus-card-grid dashboard.
 
-OWN-WORLD: Running-light blue prompt-desk bar (#1B2A5E) over a cool rehearsal-floor grey ground with white sheets for work areas; cue lamps in standby amber and go green, failed red, each state also a distinct lamp shape (filled live, ringed standby, struck failed, hollow superseded); every project marked by a short spike-tape strip in a fluorescent tape colour derived from its name. One workhorse family in two widths (sans and mono), four sizes.
+OWN-WORLD: Anodized-aluminium light ground (near-white warm grey), a near-black display band that carries live state, colour keys with fixed jobs: orange is the one go action, blue is selection and focus, green is live, red struck is failed. Square-ish 4px-grid geometry, hairline rules, no shadows. A tight grotesk for UI and a technical mono for anything typed or copied, four sizes. State as marks: filled, ringed, struck, hollow, never colour alone.
 
-STORY: The visitor sees which projects are live, opens one, attaches a database in one click, sets the values Kayly asks for, and redeploys; when something fails they read the reason on the cue sheet and roll back with a standby-then-go confirmation.
+STORY: The visitor sees at a glance which release is live, steps through history on the display, rolls back with an arm-then-go press, reads logs in a full-height pane, and configures add-ons, env and domains on one fitted Settings screen.
 
-FIRST VIEWPORT: Blue prompt-desk bar: kayly wordmark left, project switcher, sign out right. Project row: spike strip and name, the live release number as the largest type on the page beside a go lamp, service URLs, Redeploy button right. Work area: releases cue sheet (lamp column, release, status, when, reason, Roll back) leading the left two thirds with only the live row reversed; service logs below it with a service tab row. Right third: add-ons (Postgres and Redis with Add), env keys, domains, backups, as quiet sections.
+FIRST VIEWPORT: Top bar: kayly mark, project switcher (⌘K), sign out. Black display band: project name, live release number at the largest size, service URL, the release step row (one cell per release, live lit green), Redeploy as the orange key right. Tabs Overview · Logs · Settings under the band; Overview shows the selected step's detail and the release list in a pane that fills the rest of the window.
 
-FORM: Stage manager's prompt book and cue light, my grounded candidate 4 of 7, seed key 86383e99. Signature interaction: the standby-then-go control for roll back and redeploy (first press arms and lights the row's lamp amber, second press within a few seconds goes; Escape or timeout stands down), and on switch the go lamp hands over from the old row to the new one.
+FORM: Field Kit (pocket synth and field-recorder product language), my grounded candidate 3 of 7, seed key 9de862db. Signature move: the release step row on the display; selecting a step shows its detail, and on switch the live light moves to the new step. Raises: fixed capacity (j-card), one geometry (transit), strict four-size scale (bitmap specimen), state as marks (centre rail), detail only on focus (title wall).
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
