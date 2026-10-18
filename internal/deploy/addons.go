@@ -67,6 +67,9 @@ var addonKinds = map[string]addonKind{
 	},
 }
 
+// AddonImage is the pinned image new add-ons of a kind get.
+func AddonImage(kind string) string { return addonKinds[kind].image }
+
 // AddonKindNames returns the kinds of add-on Kayly supports, sorted.
 func AddonKindNames() []string { return slices.Sorted(maps.Keys(addonKinds)) }
 
@@ -76,8 +79,8 @@ func AddonContainer(project, kind string) string { return project + "_" + kind }
 // pgDatabase is the database the Postgres add-on creates: the project name as an identifier.
 func pgDatabase(project string) string { return strings.ReplaceAll(project, "-", "_") }
 
-// addonSpec is the full container spec of an add-on.
-func addonSpec(project string, a store.Addon) Spec {
+// AddonSpec is the full container spec of an add-on.
+func AddonSpec(project string, a store.Addon) Spec {
 	k := addonKinds[a.Kind]
 	s := k.spec(project, a)
 	s.Name = AddonContainer(project, a.Kind)
@@ -183,7 +186,7 @@ func (d *Deployer) startAddon(ctx context.Context, project string, a store.Addon
 	if err := d.rt.EnsureVolume(ctx, VolumeName(project, a.Kind)); err != nil {
 		return err
 	}
-	if err := d.rt.EnsureContainer(ctx, addonSpec(project, a)); err != nil || !wait {
+	if err := d.rt.EnsureContainer(ctx, AddonSpec(project, a)); err != nil || !wait {
 		return err
 	}
 	return d.waitContainerHealthy(ctx, AddonContainer(project, a.Kind))

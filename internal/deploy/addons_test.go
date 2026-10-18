@@ -375,7 +375,7 @@ func TestKaylySnapshotCarriesDatabaseAndKey(t *testing.T) {
 // recreated container) it needs DAC_OVERRIDE to read the 0700 directories.
 func TestAddonsCanReadTheirOwnDataWhenRecreated(t *testing.T) {
 	for kind := range addonKinds {
-		spec := addonSpec("app", store.Addon{Kind: kind, Image: "img", Password: "pw"})
+		spec := AddonSpec("app", store.Addon{Kind: kind, Image: "img", Password: "pw"})
 		if !slices.Contains(spec.CapAdd, "DAC_OVERRIDE") {
 			t.Errorf("%s add-on lacks DAC_OVERRIDE: %v", kind, spec.CapAdd)
 		}

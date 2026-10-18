@@ -105,7 +105,7 @@ func (d *Deployer) drillPostgres(ctx context.Context, p store.Project, a store.A
 		return "", name, err
 	}
 	// Same image and settings as the real add-on, but no network and a volume of its own.
-	spec := addonSpec(p.Name, store.Addon{ProjectID: p.ID, Kind: "postgres", Image: a.Image, Password: pw})
+	spec := AddonSpec(p.Name, store.Addon{ProjectID: p.ID, Kind: "postgres", Image: a.Image, Password: pw})
 	cname, vol := "kayly_drill_"+p.Name, "kayly_drill_"+p.Name
 	spec.Name, spec.Networks, spec.Labels = cname, nil, labels(p.Name, 0, RoleBackup, "drill")
 	spec.Mounts = []Mount{{Volume: vol, Path: addonKinds["postgres"].dataPath}}
