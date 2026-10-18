@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,8 +31,10 @@ const usage = `kayly deploys apps to your own server.
 
 On the server:
   kayly serve --base-domain <ip>.sslip.io   run the daemon (installed as a systemd unit)
-  kayly token create <name>                 create an API token for a laptop or CI
+  kayly token create <name> [-scope read|deploy|admin] [-p project] [-expires-days n]
+                                            create an API token for a laptop, CI or an agent
   kayly token ls | token rm <id>
+  kayly audit [-n lines]                    who changed what
 
 Anywhere:
   kayly login <url> <token>                 remember a server
@@ -100,6 +103,8 @@ func runClientCommand(cmd string, args []string) error {
 	follow := fs.Bool("f", false, "follow the output")
 	lines := fs.Int("n", 100, "number of lines")
 	remote := fs.Bool("remote", false, "backups: use the off-site bucket")
+	scope := fs.String("scope", "admin", "token create: read, deploy or admin")
+	expires := fs.Int("expires-days", 0, "token create: expire after this many days (0: never)")
 	from := fs.String("from", "", "backups restore: the project the backup was taken from")
 	// Flags may come before or after positional arguments.
 	var pos []string
@@ -227,7 +232,9 @@ func runClientCommand(cmd string, args []string) error {
 	case "domains":
 		return c.domains(ctx, proj, pos)
 	case "token":
-		return c.tokens(ctx, pos)
+		return c.tokens(ctx, pos, *scope, *project, *expires)
+	case "audit":
+		return c.audit(ctx, *lines)
 	case "notify":
 		return c.notify(ctx, pos)
 	}
@@ -597,11 +604,24 @@ func (c *client) domains(ctx context.Context, proj func(string) (string, error),
 	return errors.New("usage: kayly domains ls | add <hostname> <service> | rm <hostname>")
 }
 
-func (c *client) tokens(ctx context.Context, pos []string) error {
+func (c *client) audit(ctx context.Context, n int) error {
+	var entries []api.AuditView
+	if err := c.do(ctx, "GET", fmt.Sprintf("/api/v1/audit?limit=%d", n), nil, &entries); err != nil {
+		return err
+	}
+	tw := table()
+	fmt.Fprintln(tw, "WHEN\tTOKEN\tACTION\tPROJECT")
+	for _, e := range entries {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", e.At, e.Token, e.Action, e.Project)
+	}
+	return tw.Flush()
+}
+
+func (c *client) tokens(ctx context.Context, pos []string, scope, project string, expiresDays int) error {
 	switch {
 	case len(pos) == 2 && pos[0] == "create":
 		var t api.TokenView
-		if err := c.do(ctx, "POST", "/api/v1/tokens", map[string]string{"name": pos[1]}, &t); err != nil {
+		if err := c.do(ctx, "POST", "/api/v1/tokens", map[string]any{"name": pos[1], "scope": scope, "project": project, "expires_days": expiresDays}, &t); err != nil {
 			return err
 		}
 		fmt.Printf("%s\n\nShown once. On your laptop: kayly login https://<kayly host> %s\n", t.Token, t.Token)
@@ -612,9 +632,9 @@ func (c *client) tokens(ctx context.Context, pos []string) error {
 			return err
 		}
 		tw := table()
-		fmt.Fprintln(tw, "ID\tNAME\tCREATED")
+		fmt.Fprintln(tw, "ID\tNAME\tSCOPE\tPROJECT\tEXPIRES\tLAST USED")
 		for _, t := range ts {
-			fmt.Fprintf(tw, "%d\t%s\t%s\n", t.ID, t.Name, t.CreatedAt)
+			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", t.ID, t.Name, t.Scope, cmp.Or(t.Project, "all"), cmp.Or(t.ExpiresAt, "never"), cmp.Or(t.LastUsed, "never"))
 		}
 		return tw.Flush()
 	case len(pos) == 2 && pos[0] == "rm":

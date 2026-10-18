@@ -6,6 +6,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -58,43 +59,50 @@ func New(st *store.Store, d *deploy.Deployer, workDir string, log *slog.Logger) 
 // and may manage tokens; an untrusted one (behind the proxy) requires a bearer token.
 func (s *Server) Handler(trusted bool) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/projects", s.listProjects)
-	mux.HandleFunc("POST /api/v1/projects", s.createProject)
-	mux.HandleFunc("GET /api/v1/projects/{project}", s.getProject)
-	mux.HandleFunc("GET /api/v1/projects/{project}/services", s.listServices)
-	mux.HandleFunc("GET /api/v1/server", s.serverStatus)
-	mux.HandleFunc("GET /api/v1/projects/{project}/releases", s.listReleases)
-	mux.HandleFunc("GET /api/v1/projects/{project}/releases/{seq}/log", s.releaseLog)
-	mux.HandleFunc("POST /api/v1/projects/{project}/redeploy", s.redeploy)
-	mux.HandleFunc("GET /api/v1/projects/{project}/addons", s.listAddons)
-	mux.HandleFunc("POST /api/v1/projects/{project}/addons", s.addAddon)
-	mux.HandleFunc("DELETE /api/v1/projects/{project}/addons/{kind}", s.removeAddon)
-	mux.HandleFunc("GET /api/v1/projects/{project}/backups", s.listBackups)
-	mux.HandleFunc("POST /api/v1/projects/{project}/backups", s.createBackup)
-	mux.HandleFunc("POST /api/v1/projects/{project}/backups/restore", s.restoreBackup)
-	mux.HandleFunc("GET /api/v1/projects/{project}/backups/{name}", s.downloadBackup)
-	mux.HandleFunc("POST /api/v1/projects/{project}/deploys", s.deploy)
-	mux.HandleFunc("POST /api/v1/projects/{project}/rollback", s.rollback)
-	mux.HandleFunc("GET /api/v1/projects/{project}/logs", s.logs)
-	mux.HandleFunc("GET /api/v1/projects/{project}/env", s.listEnv)
-	mux.HandleFunc("PUT /api/v1/projects/{project}/env/{key}", s.setEnv)
-	mux.HandleFunc("DELETE /api/v1/projects/{project}/env/{key}", s.deleteEnv)
-	mux.HandleFunc("GET /api/v1/projects/{project}/domains", s.listDomains)
-	mux.HandleFunc("POST /api/v1/projects/{project}/domains", s.addDomain)
-	mux.HandleFunc("DELETE /api/v1/projects/{project}/domains/{hostname}", s.removeDomain)
-	mux.HandleFunc("GET /api/v1/notifications", s.getNotifications)
-	mux.HandleFunc("PUT /api/v1/notifications", s.setNotifications)
-	mux.HandleFunc("POST /api/v1/notifications/test", s.testNotifications)
-	mux.HandleFunc("POST /api/v1/backups/kayly", s.backupKayly)
-	mux.HandleFunc("GET /api/v1/offsite", s.getOffsite)
-	mux.HandleFunc("PUT /api/v1/offsite", s.setOffsite)
-	mux.HandleFunc("POST /api/v1/offsite/sync", s.syncOffsite)
-	mux.HandleFunc("POST /api/v1/offsite/drill", s.drillOffsite)
+	// handle registers a route with the scope a token needs to call it. Routes that change
+	// anything are audited. Everything under {project} is limited to a bound token's project.
+	handle := func(pattern, scope string, h http.HandlerFunc) {
+		mux.Handle(pattern, s.authorize(pattern, scope, h))
+	}
+	const read, deployScope, admin = store.ScopeRead, store.ScopeDeploy, store.ScopeAdmin
+	handle("GET /api/v1/projects", read, s.listProjects)
+	handle("POST /api/v1/projects", admin, s.createProject)
+	handle("GET /api/v1/projects/{project}", read, s.getProject)
+	handle("GET /api/v1/projects/{project}/services", read, s.listServices)
+	handle("GET /api/v1/server", read, s.serverStatus)
+	handle("GET /api/v1/projects/{project}/releases", read, s.listReleases)
+	handle("GET /api/v1/projects/{project}/releases/{seq}/log", read, s.releaseLog)
+	handle("POST /api/v1/projects/{project}/redeploy", deployScope, s.redeploy)
+	handle("GET /api/v1/projects/{project}/addons", read, s.listAddons)
+	handle("POST /api/v1/projects/{project}/addons", admin, s.addAddon)
+	handle("DELETE /api/v1/projects/{project}/addons/{kind}", admin, s.removeAddon)
+	handle("GET /api/v1/projects/{project}/backups", read, s.listBackups)
+	handle("POST /api/v1/projects/{project}/backups", deployScope, s.createBackup)
+	handle("POST /api/v1/projects/{project}/backups/restore", admin, s.restoreBackup)
+	handle("GET /api/v1/projects/{project}/backups/{name}", admin, s.downloadBackup)
+	handle("POST /api/v1/projects/{project}/deploys", deployScope, s.deploy)
+	handle("POST /api/v1/projects/{project}/rollback", deployScope, s.rollback)
+	handle("GET /api/v1/projects/{project}/logs", read, s.logs)
+	handle("GET /api/v1/projects/{project}/env", read, s.listEnv)
+	handle("PUT /api/v1/projects/{project}/env/{key}", deployScope, s.setEnv)
+	handle("DELETE /api/v1/projects/{project}/env/{key}", deployScope, s.deleteEnv)
+	handle("GET /api/v1/projects/{project}/domains", read, s.listDomains)
+	handle("POST /api/v1/projects/{project}/domains", deployScope, s.addDomain)
+	handle("DELETE /api/v1/projects/{project}/domains/{hostname}", deployScope, s.removeDomain)
+	handle("GET /api/v1/notifications", admin, s.getNotifications)
+	handle("PUT /api/v1/notifications", admin, s.setNotifications)
+	handle("POST /api/v1/notifications/test", admin, s.testNotifications)
+	handle("POST /api/v1/backups/kayly", admin, s.backupKayly)
+	handle("GET /api/v1/offsite", admin, s.getOffsite)
+	handle("PUT /api/v1/offsite", admin, s.setOffsite)
+	handle("POST /api/v1/offsite/sync", admin, s.syncOffsite)
+	handle("POST /api/v1/offsite/drill", admin, s.drillOffsite)
+	handle("GET /api/v1/audit", admin, s.auditLog)
 	if trusted {
 		mux.HandleFunc("GET /api/v1/tokens", s.listTokens)
 		mux.HandleFunc("POST /api/v1/tokens", s.createToken)
 		mux.HandleFunc("DELETE /api/v1/tokens/{id}", s.deleteToken)
-		return mux
+		return withToken(localToken, mux)
 	}
 	root := http.NewServeMux()
 	root.HandleFunc("POST /api/v1/session", s.login)
@@ -104,6 +112,56 @@ func (s *Server) Handler(trusted bool) http.Handler {
 		root.Handle("/", uiHandler(s.UI))
 	}
 	return root
+}
+
+// localToken stands for whoever can open the root-only admin socket.
+var localToken = store.Token{Name: "local", Scope: store.ScopeAdmin}
+
+type tokenKey struct{}
+
+func withToken(t store.Token, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tokenKey{}, t)))
+	})
+}
+
+// boundOK lists the routes outside a project that a project-bound token may still call; they
+// show only that project (see listProjects) or nothing project-specific.
+var boundOK = map[string]bool{"GET /api/v1/projects": true, "GET /api/v1/server": true}
+
+// audit records a change made by a handler itself (token routes bypass authorize).
+func (s *Server) audit(r *http.Request, action, project string) {
+	tok, _ := r.Context().Value(tokenKey{}).(store.Token)
+	if err := s.store.Audit(r.Context(), store.AuditEntry{Token: tok.Name, Action: action, Project: project}); err != nil {
+		s.log.Warn("audit failed", "action", action, "err", err)
+	}
+}
+
+// authorize refuses a request whose token has too little scope or belongs to another
+// project, and audits the ones that change something.
+func (s *Server) authorize(pattern, scope string, next http.HandlerFunc) http.Handler {
+	write := !strings.HasPrefix(pattern, "GET ")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tok, _ := r.Context().Value(tokenKey{}).(store.Token)
+		if !tok.Allows(scope) {
+			writeError(w, http.StatusForbidden, "forbidden",
+				fmt.Sprintf("this token has the %s scope; this needs %s", tok.Scope, scope),
+				"create a token with a wider scope: kayly token create <name> -scope "+scope)
+			return
+		}
+		name := r.PathValue("project")
+		if tok.Project != "" && (name != "" && name != tok.Project || name == "" && !boundOK[pattern]) {
+			writeError(w, http.StatusForbidden, "forbidden", "this token is limited to project "+tok.Project, "")
+			return
+		}
+		if write {
+			if err := s.store.Audit(r.Context(), store.AuditEntry{Token: tok.Name, Action: pattern, Project: name}); err != nil {
+				s.fail(w, r, err)
+				return
+			}
+		}
+		next(w, r)
+	})
 }
 
 // sessionCookie carries an API token for the web UI.
@@ -125,20 +183,23 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 				}
 			}
 		}
+		var t store.Token
 		if ok {
-			valid, err := s.store.CheckToken(r.Context(), tok)
-			if err != nil {
+			var err error
+			t, err = s.store.LookupToken(r.Context(), tok)
+			if errors.Is(err, store.ErrNotFound) {
+				ok = false
+			} else if err != nil {
 				s.fail(w, r, err)
 				return
 			}
-			ok = valid
 		}
 		if !ok {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid token",
+			writeError(w, http.StatusUnauthorized, "unauthorized", "missing, invalid or expired token",
 				"create one on the server with `kayly token create <name>`, then `kayly login`")
 			return
 		}
-		next.ServeHTTP(w, r)
+		withToken(t, next).ServeHTTP(w, r)
 	})
 }
 
@@ -150,12 +211,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	ok, err := s.store.CheckToken(r.Context(), strings.TrimSpace(body.Token))
-	if err != nil {
+	_, err := s.store.LookupToken(r.Context(), strings.TrimSpace(body.Token))
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.fail(w, r, err)
 		return
 	}
-	if !ok {
+	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "this token is not valid",
 			"create one on the server with `kayly token create <name>`")
 		return
@@ -205,8 +266,12 @@ func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	bound := r.Context().Value(tokenKey{}).(store.Token).Project
 	out := []ProjectView{}
 	for _, p := range projects {
+		if bound != "" && p.Name != bound {
+			continue
+		}
 		v := ProjectView{Name: p.Name, CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339)}
 		if p.ActiveRelease != 0 {
 			rel, err := s.store.ReleaseByID(r.Context(), p.ActiveRelease)
@@ -739,8 +804,19 @@ func (s *Server) removeDomain(w http.ResponseWriter, r *http.Request) {
 type TokenView struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
+	Scope     string `json:"scope"`
+	Project   string `json:"project,omitempty"`
 	Token     string `json:"token,omitempty"`
+	ExpiresAt string `json:"expires_at,omitempty"`
 	CreatedAt string `json:"created_at,omitempty"`
+	LastUsed  string `json:"last_used_at,omitempty"`
+}
+
+func timeView(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func (s *Server) listTokens(w http.ResponseWriter, r *http.Request) {
@@ -751,14 +827,18 @@ func (s *Server) listTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []TokenView{}
 	for _, t := range toks {
-		out = append(out, TokenView{ID: t.ID, Name: t.Name, CreatedAt: t.CreatedAt.UTC().Format(time.RFC3339)})
+		out = append(out, TokenView{ID: t.ID, Name: t.Name, Scope: t.Scope, Project: t.Project,
+			ExpiresAt: timeView(t.ExpiresAt), CreatedAt: timeView(t.CreatedAt), LastUsed: timeView(t.LastUsedAt)})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		Name        string `json:"name"`
+		Scope       string `json:"scope"`
+		Project     string `json:"project"`
+		ExpiresDays int    `json:"expires_days"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -767,12 +847,62 @@ func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_name", "a token needs a name", "name it after where it is used, e.g. laptop")
 		return
 	}
-	tok, err := s.store.CreateToken(r.Context(), body.Name)
+	if body.Scope == "" {
+		body.Scope = store.ScopeAdmin
+	}
+	if !store.ValidScope(body.Scope) {
+		writeError(w, http.StatusBadRequest, "invalid_scope", fmt.Sprintf("%q is not a token scope", body.Scope), "use read, deploy or admin")
+		return
+	}
+	if body.ExpiresDays < 0 {
+		writeError(w, http.StatusBadRequest, "invalid_expiry", "expires_days cannot be negative", "")
+		return
+	}
+	n := store.NewToken{Name: body.Name, Scope: body.Scope}
+	if body.Project != "" {
+		p, err := s.store.Project(r.Context(), body.Project)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		n.ProjectID = p.ID
+	}
+	if body.ExpiresDays > 0 {
+		n.ExpiresAt = time.Now().AddDate(0, 0, body.ExpiresDays)
+	}
+	tok, err := s.store.CreateToken(r.Context(), n)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, TokenView{Name: body.Name, Token: tok})
+	s.audit(r, "token create "+body.Name, body.Project)
+	writeJSON(w, http.StatusCreated, TokenView{Name: body.Name, Scope: body.Scope, Project: body.Project, Token: tok, ExpiresAt: timeView(n.ExpiresAt)})
+}
+
+// AuditView is one entry of the audit log.
+type AuditView struct {
+	At      string `json:"at"`
+	Token   string `json:"token"`
+	Action  string `json:"action"`
+	Project string `json:"project,omitempty"`
+}
+
+func (s *Server) auditLog(w http.ResponseWriter, r *http.Request) {
+	limit, err := strconv.Atoi(cmp.Or(r.URL.Query().Get("limit"), "100"))
+	if err != nil || limit < 1 || limit > 1000 {
+		writeError(w, http.StatusBadRequest, "invalid_limit", "limit must be between 1 and 1000", "")
+		return
+	}
+	entries, err := s.store.AuditLog(r.Context(), limit)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	out := []AuditView{}
+	for _, e := range entries {
+		out = append(out, AuditView{At: timeView(e.At), Token: e.Token, Action: e.Action, Project: e.Project})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) deleteToken(w http.ResponseWriter, r *http.Request) {
@@ -785,6 +915,7 @@ func (s *Server) deleteToken(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	s.audit(r, "token delete "+r.PathValue("id"), "")
 	w.WriteHeader(http.StatusNoContent)
 }
 

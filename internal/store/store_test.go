@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kotlovyim-dev/kayly/internal/secret"
 )
@@ -166,14 +167,15 @@ func must(t *testing.T, err error) {
 func TestTokens(t *testing.T) {
 	ctx := context.Background()
 	s, _ := open(t)
-	tok, err := s.CreateToken(ctx, "laptop")
+	p, _ := s.CreateProject(ctx, "app")
+	tok, err := s.CreateToken(ctx, NewToken{Name: "laptop", Scope: ScopeAdmin})
 	if err != nil || len(tok) < 40 {
 		t.Fatalf("token = %q, %v", tok, err)
 	}
-	if ok, _ := s.CheckToken(ctx, tok); !ok {
+	if _, err := s.LookupToken(ctx, tok); err != nil {
 		t.Error("valid token rejected")
 	}
-	if ok, _ := s.CheckToken(ctx, tok+"x"); ok {
+	if _, err := s.LookupToken(ctx, tok+"x"); !errors.Is(err, ErrNotFound) {
 		t.Error("wrong token accepted")
 	}
 	var raw []byte
@@ -181,10 +183,39 @@ func TestTokens(t *testing.T) {
 	if bytes.Contains(raw, []byte(tok)) {
 		t.Error("token stored in plaintext")
 	}
+
+	agent, _ := s.CreateToken(ctx, NewToken{Name: "agent", Scope: ScopeDeploy, ProjectID: p.ID, ExpiresAt: time.Now().Add(time.Hour)})
+	got, err := s.LookupToken(ctx, agent)
+	if err != nil || got.Scope != ScopeDeploy || got.Project != "app" || got.ExpiresAt.IsZero() {
+		t.Fatalf("agent token = %+v, %v", got, err)
+	}
+	if !got.Allows(ScopeRead) || !got.Allows(ScopeDeploy) || got.Allows(ScopeAdmin) {
+		t.Errorf("deploy token allows wrong scopes: %+v", got)
+	}
+	if _, err := s.CreateToken(ctx, NewToken{Name: "x", Scope: "root"}); err == nil {
+		t.Error("unknown scope accepted")
+	}
+
+	expired, _ := s.CreateToken(ctx, NewToken{Name: "old", Scope: ScopeRead, ExpiresAt: time.Now().Add(-time.Second)})
+	if _, err := s.LookupToken(ctx, expired); !errors.Is(err, ErrNotFound) {
+		t.Error("expired token accepted")
+	}
+
 	list, _ := s.Tokens(ctx)
 	must(t, s.DeleteToken(ctx, list[0].ID))
-	if ok, _ := s.CheckToken(ctx, tok); ok {
+	if _, err := s.LookupToken(ctx, tok); !errors.Is(err, ErrNotFound) {
 		t.Error("revoked token accepted")
+	}
+}
+
+func TestAudit(t *testing.T) {
+	ctx := context.Background()
+	s, _ := open(t)
+	must(t, s.Audit(ctx, AuditEntry{Token: "agent", Action: "POST /api/v1/projects/{project}/rollback", Project: "app"}))
+	must(t, s.Audit(ctx, AuditEntry{Token: "local", Action: "POST /api/v1/projects"}))
+	log, err := s.AuditLog(ctx, 10)
+	if err != nil || len(log) != 2 || log[0].Token != "local" || log[1].Project != "app" {
+		t.Fatalf("audit log = %+v, %v", log, err)
 	}
 }
 

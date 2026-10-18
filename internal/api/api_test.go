@@ -350,3 +350,51 @@ func TestServicesAndServerRoutes(t *testing.T) {
 		t.Fatalf("unknown project: %d", code)
 	}
 }
+
+func TestTokenScopeAndProject(t *testing.T) {
+	e := newEnv(t)
+	for _, name := range []string{"app", "other"} {
+		e.do(e.trusted, "POST", "/api/v1/projects", `{"name":"`+name+`"}`, "")
+	}
+	mint := func(body string) string {
+		t.Helper()
+		code, out := e.do(e.trusted, "POST", "/api/v1/tokens", body, "")
+		var tv TokenView
+		json.Unmarshal([]byte(out), &tv)
+		if code != 201 {
+			t.Fatalf("create token %s: %d %s", body, code, out)
+		}
+		return tv.Token
+	}
+	reader := mint(`{"name":"reader","scope":"read"}`)
+	agent := mint(`{"name":"agent","scope":"deploy","project":"app","expires_days":7}`)
+
+	for _, c := range []struct {
+		token, method, path string
+		want                int
+	}{
+		{reader, "GET", "/api/v1/projects/app", 200},
+		{reader, "PUT", "/api/v1/projects/app/env/KEY", 403},
+		{agent, "PUT", "/api/v1/projects/app/env/KEY", 400}, // allowed; fails on a missing body, not on auth
+		{agent, "GET", "/api/v1/projects/other", 403},
+		{agent, "POST", "/api/v1/projects/app/addons", 403},
+		{agent, "POST", "/api/v1/projects", 403},
+		{agent, "GET", "/api/v1/notifications", 403},
+		{agent, "GET", "/api/v1/projects", 200},
+	} {
+		if code, out := e.do(e.public, c.method, c.path, "", c.token); code != c.want {
+			t.Errorf("%s %s = %d, want %d (%s)", c.method, c.path, code, c.want, out)
+		}
+	}
+
+	_, out := e.do(e.public, "GET", "/api/v1/projects", "", agent)
+	if strings.Contains(out, "other") || !strings.Contains(out, "app") {
+		t.Errorf("bound token sees %s", out)
+	}
+
+	// Refused calls are not changes; allowed writes are, under the token's name.
+	_, out = e.do(e.trusted, "GET", "/api/v1/audit", "", "")
+	if !strings.Contains(out, `"token":"agent"`) || strings.Contains(out, "addons") {
+		t.Errorf("audit log = %s", out)
+	}
+}

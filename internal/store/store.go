@@ -117,6 +117,17 @@ CREATE TABLE setting (
 `, `
 ALTER TABLE release ADD COLUMN commit_sha TEXT NOT NULL DEFAULT '';
 ALTER TABLE release ADD COLUMN commit_msg TEXT NOT NULL DEFAULT '';
+`, `
+ALTER TABLE token ADD COLUMN scope TEXT NOT NULL DEFAULT 'admin' CHECK (scope IN ('read','deploy','admin'));
+ALTER TABLE token ADD COLUMN project_id INTEGER REFERENCES project(id) ON DELETE CASCADE;
+ALTER TABLE token ADD COLUMN expires_at INTEGER;
+CREATE TABLE audit (
+	id         INTEGER PRIMARY KEY,
+	token      TEXT NOT NULL,
+	action     TEXT NOT NULL,
+	project    TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL
+);
 `}
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -470,53 +481,114 @@ func (s *Store) RemoveDomain(ctx context.Context, hostname string) error {
 	return nil
 }
 
+// Token scopes, each including the ones before it.
+const (
+	ScopeRead   = "read"
+	ScopeDeploy = "deploy"
+	ScopeAdmin  = "admin"
+)
+
+var scopeRank = map[string]int{ScopeRead: 1, ScopeDeploy: 2, ScopeAdmin: 3}
+
+// ValidScope reports whether scope is one of the token scopes.
+func ValidScope(scope string) bool { return scopeRank[scope] != 0 }
+
 // Token is an API token. Only its SHA-256 is stored.
 type Token struct {
-	ID        int64
-	Name      string
+	ID    int64
+	Name  string
+	Scope string
+	// Project is the one project the token is limited to; empty means every project.
+	Project   string
+	ExpiresAt time.Time // zero: never
 	CreatedAt time.Time
+	// LastUsedAt is zero until the token is first used.
+	LastUsedAt time.Time
+}
+
+// Allows reports whether the token's scope covers scope.
+func (t Token) Allows(scope string) bool { return scopeRank[t.Scope] >= scopeRank[scope] }
+
+// NewToken describes a token to create. ProjectID 0 and a zero ExpiresAt mean no limit.
+type NewToken struct {
+	Name      string
+	Scope     string
+	ProjectID int64
+	ExpiresAt time.Time
 }
 
 // CreateToken generates a token, stores its hash and returns the plaintext once.
-func (s *Store) CreateToken(ctx context.Context, name string) (plaintext string, err error) {
+func (s *Store) CreateToken(ctx context.Context, n NewToken) (plaintext string, err error) {
+	if !ValidScope(n.Scope) {
+		return "", fmt.Errorf("store: create token: unknown scope %q", n.Scope)
+	}
 	buf := make([]byte, 32)
 	rand.Read(buf)
 	plaintext = "kayly_" + base64.RawURLEncoding.EncodeToString(buf)
 	sum := sha256.Sum256([]byte(plaintext))
-	_, err = s.db.ExecContext(ctx, "INSERT INTO token (name, hash, created_at) VALUES (?, ?, ?)",
-		name, sum[:], time.Now().Unix())
+	var project, expires any
+	if n.ProjectID != 0 {
+		project = n.ProjectID
+	}
+	if !n.ExpiresAt.IsZero() {
+		expires = n.ExpiresAt.Unix()
+	}
+	_, err = s.db.ExecContext(ctx,
+		"INSERT INTO token (name, hash, scope, project_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+		n.Name, sum[:], n.Scope, project, expires, time.Now().Unix())
 	if err != nil {
 		return "", fmt.Errorf("store: create token: %w", err)
 	}
 	return plaintext, nil
 }
 
-// CheckToken reports whether plaintext is a known token and records its use.
-func (s *Store) CheckToken(ctx context.Context, plaintext string) (bool, error) {
-	sum := sha256.Sum256([]byte(plaintext))
-	res, err := s.db.ExecContext(ctx, "UPDATE token SET last_used_at = ? WHERE hash = ?", time.Now().Unix(), sum[:])
-	if err != nil {
-		return false, err
+const tokenSelect = `SELECT t.id, t.name, t.scope, coalesce(p.name, ''), coalesce(t.expires_at, 0), t.created_at, coalesce(t.last_used_at, 0)
+	FROM token t LEFT JOIN project p ON p.id = t.project_id`
+
+func scanToken(row interface{ Scan(...any) error }) (Token, error) {
+	var t Token
+	var expires, created, used int64
+	if err := row.Scan(&t.ID, &t.Name, &t.Scope, &t.Project, &expires, &created, &used); err != nil {
+		return Token{}, err
 	}
-	n, _ := res.RowsAffected()
-	return n == 1, nil
+	t.CreatedAt = time.Unix(created, 0)
+	if expires != 0 {
+		t.ExpiresAt = time.Unix(expires, 0)
+	}
+	if used != 0 {
+		t.LastUsedAt = time.Unix(used, 0)
+	}
+	return t, nil
+}
+
+// LookupToken returns the token behind plaintext and records its use. An unknown or expired
+// token is ErrNotFound.
+func (s *Store) LookupToken(ctx context.Context, plaintext string) (Token, error) {
+	sum := sha256.Sum256([]byte(plaintext))
+	t, err := scanToken(s.db.QueryRowContext(ctx, tokenSelect+" WHERE t.hash = ?", sum[:]))
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !t.ExpiresAt.IsZero() && !t.ExpiresAt.After(time.Now())) {
+		return Token{}, fmt.Errorf("token: %w", ErrNotFound)
+	}
+	if err != nil {
+		return Token{}, err
+	}
+	_, err = s.db.ExecContext(ctx, "UPDATE token SET last_used_at = ? WHERE id = ?", time.Now().Unix(), t.ID)
+	return t, err
 }
 
 // Tokens lists API tokens, oldest first.
 func (s *Store) Tokens(ctx context.Context) ([]Token, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name, created_at FROM token ORDER BY id")
+	rows, err := s.db.QueryContext(ctx, tokenSelect+" ORDER BY t.id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Token
 	for rows.Next() {
-		var t Token
-		var created int64
-		if err := rows.Scan(&t.ID, &t.Name, &created); err != nil {
+		t, err := scanToken(rows)
+		if err != nil {
 			return nil, err
 		}
-		t.CreatedAt = time.Unix(created, 0)
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -532,6 +604,43 @@ func (s *Store) DeleteToken(ctx context.Context, id int64) error {
 		return fmt.Errorf("token %d: %w", id, ErrNotFound)
 	}
 	return nil
+}
+
+// AuditEntry is one change made through the API. Token is the token's name, kept after the
+// token is revoked; it is "local" for the root-only admin socket.
+type AuditEntry struct {
+	Token, Action, Project string
+	At                     time.Time
+}
+
+// Audit records a change.
+func (s *Store) Audit(ctx context.Context, e AuditEntry) error {
+	_, err := s.db.ExecContext(ctx, "INSERT INTO audit (token, action, project, created_at) VALUES (?, ?, ?, ?)",
+		e.Token, e.Action, e.Project, time.Now().Unix())
+	if err != nil {
+		return fmt.Errorf("store: audit: %w", err)
+	}
+	return nil
+}
+
+// AuditLog returns the newest limit entries, newest first.
+func (s *Store) AuditLog(ctx context.Context, limit int) ([]AuditEntry, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT token, action, project, created_at FROM audit ORDER BY id DESC LIMIT ?", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditEntry
+	for rows.Next() {
+		var e AuditEntry
+		var at int64
+		if err := rows.Scan(&e.Token, &e.Action, &e.Project, &at); err != nil {
+			return nil, err
+		}
+		e.At = time.Unix(at, 0)
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // Addon is a stateful resource attached to a project, such as a Postgres server.
