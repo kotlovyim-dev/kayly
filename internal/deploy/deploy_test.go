@@ -52,6 +52,7 @@ type harness struct {
 	logs    string
 	// alerts are the notifications the Deployer sent.
 	alerts []string
+	tg     *fakeBotAPI
 }
 
 func newHarness(t *testing.T) *harness {
@@ -70,7 +71,7 @@ func newHarness(t *testing.T) *harness {
 	must(t, st.SetEnv(ctx, p.ID, "API_KEY", "key-1"))
 	must(t, st.SetEnv(ctx, p.ID, "ADMIN", "root"))
 
-	h := &harness{t: t, st: st, rt: newFakeRuntime(), px: &fakeProxy{}, dir: t.TempDir(), backups: t.TempDir()}
+	h := &harness{t: t, st: st, rt: newFakeRuntime(), px: &fakeProxy{}, dir: t.TempDir(), backups: t.TempDir(), tg: newFakeBotAPI(t)}
 	h.writeConfig(app)
 	h.logs = t.TempDir()
 	h.keyFile = filepath.Join(t.TempDir(), "master.key")
@@ -91,6 +92,7 @@ func (h *harness) newDeployer() *Deployer {
 		KeyFile:       h.keyFile,
 		LogDir:        h.logs,
 		Notify:        func(_ context.Context, text string) { h.alerts = append(h.alerts, text) },
+		TelegramAPI:   h.tg.srv.URL,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	d.checkHealth = h.rt.health
 	d.settle = 0

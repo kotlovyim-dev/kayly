@@ -24,6 +24,7 @@ import (
 	"github.com/kotlovyim-dev/kayly/internal/proxy"
 	"github.com/kotlovyim-dev/kayly/internal/secret"
 	"github.com/kotlovyim-dev/kayly/internal/store"
+	"github.com/kotlovyim-dev/kayly/internal/telegram"
 )
 
 // Options configure a Deployer. Zero durations take the defaults.
@@ -54,6 +55,8 @@ type Options struct {
 	KeyFile string
 	// Notify tells the owner about a failure. Nil sends nothing.
 	Notify func(ctx context.Context, text string)
+	// TelegramAPI is the Bot API origin for bot services. Default telegram.API.
+	TelegramAPI string
 }
 
 // Deployer runs deploys, rollbacks and reconciliation. It is safe for concurrent use;
@@ -80,6 +83,11 @@ type Deployer struct {
 	watch     watcher
 	// settle is how long a service without a port must run before it counts as healthy.
 	settle time.Duration
+
+	// botMu guards botFailing: the bots, by project/service, whose Telegram setup the owner
+	// was told is failing.
+	botMu      sync.Mutex
+	botFailing map[string]bool
 }
 
 // New returns a Deployer.
@@ -96,9 +104,13 @@ func New(st *store.Store, rt Runtime, b Builder, p Proxy, opt Options, log *slog
 	if opt.KeepImages == 0 {
 		opt.KeepImages = 3
 	}
+	if opt.TelegramAPI == "" {
+		opt.TelegramAPI = telegram.API
+	}
 	return &Deployer{
 		store: st, rt: rt, builder: b, proxy: p, opt: opt, log: log,
 		locks:       map[string]*sync.Mutex{},
+		botFailing:  map[string]bool{},
 		checkHealth: probe,
 		clock:       time.Now,
 		diskUsage:   statfsUsage,
@@ -309,6 +321,10 @@ func (d *Deployer) activate(ctx context.Context, p store.Project, rel store.Rele
 		old, oldCfg = &r, c
 	}
 
+	if err := d.prepareBots(ctx, p, rel, cfg, w); err != nil {
+		return err
+	}
+
 	// The only change to the live release before the switch, and only when asked for.
 	if old != nil {
 		for _, name := range slices.Sorted(maps.Keys(cfg.Services)) {
@@ -336,6 +352,14 @@ func (d *Deployer) activate(ctx context.Context, p store.Project, rel store.Rele
 	step(w, "switch")
 	if err := d.switchTo(ctx, p, rel); err != nil {
 		return err
+	}
+	var oldEnv map[string]map[string]string
+	if old != nil {
+		oldEnv = old.Env
+	}
+	// Like the drain, a failure here leaves the release live; the reconciler retries.
+	if err := d.syncBots(ctx, p, rel, cfg, oldEnv); err != nil {
+		fmt.Fprintf(w, "warning: %v; Kayly retries every 30 s\n", err)
 	}
 
 	if old != nil {
@@ -514,11 +538,7 @@ func (d *Deployer) resolveEnv(ctx context.Context, p store.Project, cfg *config.
 	if err != nil {
 		return nil, err
 	}
-	for name, s := range cfg.Services {
-		if hosts := d.hosts(p.Name, name, domains); s.Port != 0 && len(hosts) > 0 {
-			refs[name+".url"] = "https://" + hosts[0]
-		}
-	}
+	maps.Copy(refs, d.serviceURLs(p.Name, cfg, domains))
 	env, ignored, err := cfg.ResolveEnv(stored, refs, injected)
 	if err != nil {
 		var me *config.MissingError
@@ -531,6 +551,17 @@ func (d *Deployer) resolveEnv(ctx context.Context, p store.Project, cfg *config.
 		fmt.Fprintf(w, "warning: not declared in [env], not delivered: %s\n", strings.Join(ignored, ", "))
 	}
 	return env, nil
+}
+
+// serviceURLs returns ${<service>.url} of every service with a port and a host.
+func (d *Deployer) serviceURLs(project string, cfg *config.Config, domains []store.Domain) map[string]string {
+	urls := map[string]string{}
+	for name, s := range cfg.Services {
+		if hosts := d.hosts(project, name, domains); s.Port != 0 && len(hosts) > 0 {
+			urls[name+".url"] = "https://" + hosts[0]
+		}
+	}
+	return urls
 }
 
 // hosts returns the hostnames of a service: custom domains first (oldest first), then the

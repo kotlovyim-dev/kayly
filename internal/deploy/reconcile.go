@@ -48,7 +48,8 @@ func (d *Deployer) Loop(ctx context.Context, interval time.Duration) {
 //     container removed below);
 //  2. for every project not busy with a deploy, the live release's containers are made to
 //     run and every other container of the project is removed;
-//  3. containers of projects that no longer exist are removed.
+//  3. the bots of every live release are pointed where their telegram table says;
+//  4. containers of projects that no longer exist are removed.
 func (d *Deployer) Reconcile(ctx context.Context) error {
 	d.proxyMu.Lock()
 	err := d.loadProxy(ctx, nil)
@@ -118,9 +119,10 @@ func (d *Deployer) reconcileProject(ctx context.Context, project string) error {
 func (d *Deployer) converge(ctx context.Context, p store.Project, have []Container) error {
 	want := map[string]Spec{}
 	var cfg *config.Config
+	var rel store.Release
 	if p.ActiveRelease != 0 {
-		rel, err := d.store.ReleaseByID(ctx, p.ActiveRelease)
-		if err != nil {
+		var err error
+		if rel, err = d.store.ReleaseByID(ctx, p.ActiveRelease); err != nil {
 			return err
 		}
 		if cfg, err = config.Parse(rel.Config); err != nil {
@@ -162,6 +164,10 @@ func (d *Deployer) converge(ctx context.Context, p store.Project, have []Contain
 		if err := d.rt.Run(ctx, want[name]); err != nil {
 			errs = append(errs, fmt.Errorf("start %s: %w", name, err))
 		}
+	}
+	if cfg != nil {
+		// Failures reach the owner from syncBots, once; they are not reconcile errors.
+		d.syncBots(ctx, p, rel, cfg, rel.Env)
 	}
 	return errors.Join(errs...)
 }

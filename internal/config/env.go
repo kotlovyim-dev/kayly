@@ -197,3 +197,20 @@ func (c *Config) expand(key string, values, refs map[string]string) (string, err
 	values[key] = out
 	return out, nil
 }
+
+// ExpandRefs resolves the ${name.field} references of tmpl from refs, as a menu button URL
+// needs at the time it is applied.
+func ExpandRefs(tmpl string, refs map[string]string) (string, error) {
+	var missing []string
+	out := refRe.ReplaceAllStringFunc(tmpl, func(m string) string {
+		v, ok := refs[m[2:len(m)-1]]
+		if !ok {
+			missing = append(missing, m)
+		}
+		return v
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("%s has no value", strings.Join(missing, ", "))
+	}
+	return out, nil
+}
