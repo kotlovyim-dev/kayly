@@ -2,7 +2,7 @@
 
 Every release of Kayly, newest first. The format follows [Keep a Changelog](https://keepachangelog.com); versions follow [semantic versioning](docs/compatibility.md) from 1.0. When a version is tagged, its section here becomes the release notes, so rename `Unreleased` to `[x.y.z] - date` in the commit that is tagged.
 
-## [Unreleased]
+## [0.5.0] - 2026-10-20
 
 ### Added
 - `kayly upgrade [version]`: installs a signed release after a Kayly backup, keeps the previous binary as `kayly.previous`, restarts the daemon after running deploys finish, and refuses a downgrade. Apps and the proxy keep serving.
