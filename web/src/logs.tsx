@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, api } from './api';
-import { ErrorNote, Pane } from './ui';
+import { ApiError, api } from '@/api';
+import { ErrorNote } from '@/components/common';
+import { StatusDot } from '@/components/status';
+import { cn } from '@/lib/utils';
 
 // The output kept in the page; older lines scroll out so a chatty service cannot grow it forever.
 const MAX_CHARS = 200_000;
 
-/** Streams the output of one service of the live release, one tab per service. */
+/** Streams the output of one service of the live release. */
 export function Logs({ name, services, releaseSeq }: { name: string; services: string[]; releaseSeq: number }) {
   const [service, setService] = useState(services[0] ?? '');
   const [text, setText] = useState('');
@@ -59,14 +61,17 @@ export function Logs({ name, services, releaseSeq }: { name: string; services: s
   }, [text, following]);
 
   return (
-    <Pane
-      id="logs"
-      title={following ? 'Logs · following' : 'Logs'}
-      scroll={false}
-      className="h-full max-lg:h-[calc(100dvh-14rem)]"
-      action={
-        services.length > 1 && (
-          <div role="tablist" aria-label="Service" className="flex rounded-[3px] border border-rule p-0.5">
+    <section aria-labelledby="logs" className="flex h-[calc(100dvh-15rem)] min-h-80 flex-col rounded-card border lg:h-[calc(100dvh-14rem)]">
+      <header className="flex min-h-12 flex-wrap items-center gap-3 border-b px-4 py-2">
+        <h2 id="logs" className="text-body font-semibold">
+          Output of <span className="font-mono">{service}</span>
+        </h2>
+        <span className="flex items-center gap-1.5 text-small text-muted-foreground" aria-live="polite">
+          <StatusDot tone={following ? 'positive' : 'off'} label="" />
+          {following ? `Following r${releaseSeq}` : 'Paused while you scroll'}
+        </span>
+        {services.length > 1 && (
+          <div role="tablist" aria-label="Service" className="ml-auto flex h-8 rounded-control bg-raised p-0.5">
             {services.map((s) => (
               <button
                 key={s}
@@ -74,22 +79,18 @@ export function Logs({ name, services, releaseSeq }: { name: string; services: s
                 type="button"
                 aria-selected={s === service}
                 onClick={() => setService(s)}
-                className={`h-7 rounded-[2px] px-2.5 text-meta font-semibold transition-colors duration-150 ${
-                  s === service ? 'bg-display text-display-ink' : 'text-ink-2 hover:bg-hover hover:text-ink'
-                }`}
+                className={cn(
+                  'rounded-[5px] border px-3 text-body transition-colors duration-150',
+                  s === service ? 'border-border bg-background font-medium' : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
               >
                 {s}
               </button>
             ))}
           </div>
-        )
-      }
-    >
-      {error ? (
-        <div className="border-b border-rule px-4 py-2">
-          <ErrorNote error={error} />
-        </div>
-      ) : null}
+        )}
+      </header>
+      {error ? <ErrorNote error={error} className="border-b px-4 py-2.5" /> : null}
       {!(error instanceof ApiError) && (
         <pre
           ref={ref}
@@ -100,11 +101,11 @@ export function Logs({ name, services, releaseSeq }: { name: string; services: s
             const el = e.currentTarget;
             setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
           }}
-          className="min-h-0 flex-1 overflow-auto rounded-b-md bg-code px-4 py-3 font-mono text-meta whitespace-pre-wrap text-ink"
+          className="min-h-0 flex-1 overflow-auto rounded-b-card bg-raised px-4 py-3 font-mono text-small whitespace-pre-wrap"
         >
           {text || `No output from ${service} yet.`}
         </pre>
       )}
-    </Pane>
+    </section>
   );
 }

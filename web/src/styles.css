@@ -1,184 +1,223 @@
 @import 'tailwindcss';
-@import '@fontsource-variable/host-grotesk';
-@import '@fontsource-variable/martian-mono/wdth.css';
+@import 'tw-animate-css';
+@import '@fontsource-variable/ibm-plex-sans/wght.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
 
 /*
- * Field kit: a small, exact instrument. An aluminium ground, one black display for what is
- * live, and colour keys with fixed jobs: orange goes, blue selects, green is live, red failed.
+ * Framed sheet (DESIGN.md): one tinted L-frame holds the sidebar and the top bar; the work sits
+ * on a white sheet with a hairline edge. Colour goes on data and state, not on chrome. Names follow
+ * shadcn/ui so its components read them; the extras (frame, raised, rule, positive…) are ours.
  */
 :root {
-  --k-ground: #e9e8e4;
-  --k-surface: #fbfbf9;
-  --k-ink: #151515;
-  --k-ink-2: #5a5a55;
-  --k-rule: #d4d3cd;
-  --k-hover: #f0efeb;
-  --k-display: #121213;
-  --k-display-ink: #f3f3ef;
-  --k-display-ink-2: #a1a19b;
-  --k-display-rule: #2b2b2c;
-  --k-display-hover: #1f1f21;
-  --k-go: #ff5b1f;
-  --k-go-hover: #ff7440;
-  --k-go-ink: #111111;
-  --k-select: #3d6bff;
-  --k-select-ink: #2f55d4;
-  --k-live: #2fbf71;
-  --k-live-ink: #177a45;
-  --k-busy: #f2b200;
-  --k-busy-ink: #855f00;
-  --k-fail: #ef4134;
-  --k-fail-ink: #c0261b;
-  --k-code: #f3f2ee;
+  --frame: #f6f9f9;
+  --background: #ffffff;
+  --foreground: #131416;
+  --raised: #f4f6f8;
+  --active: #ebedee;
+  --border: #e8eaec;
+  --rule: #f0f1f2;
+  --input: #cdced1;
+  --muted-foreground: #5d5f60;
+  --primary: #131416;
+  --primary-foreground: #ffffff;
+  --ring: #1b6c80;
+  --chart-1: #1b6c80;
+  --positive: #1e7b4f;
+  --negative: #c4242a;
+  --warning: #92400e;
+  --pill-positive-bg: #dcfae5;
+  --pill-positive-ink: #04250e;
+  --pill-negative-bg: #ffedea;
+  --pill-negative-ink: #831c1e;
+  --pill-warning-bg: #fffbeb;
+  --pill-warning-ink: #92400e;
+  --pill-warning-edge: #fde68a;
+  --pill-neutral-bg: #ebedee;
+  --pill-neutral-ink: #353736;
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --k-ground: #111111;
-    --k-surface: #191919;
-    --k-ink: #ececea;
-    --k-ink-2: #a3a39d;
-    --k-rule: #2c2c2b;
-    --k-hover: #222221;
-    --k-display: #050505;
-    --k-display-ink: #f3f3ef;
-    --k-display-ink-2: #a1a19b;
-    --k-display-rule: #262627;
-    --k-display-hover: #18181a;
-    --k-select: #6b8dff;
-    --k-select-ink: #93abff;
-    --k-live: #3bcf80;
-    --k-live-ink: #6fdea1;
-    --k-busy: #f5c033;
-    --k-busy-ink: #f5c86a;
-    --k-fail: #f25a4e;
-    --k-fail-ink: #ff8a80;
-    --k-code: #141414;
+  :root:not([data-theme='light']) {
+    --frame: #090a0b;
+    --background: #111213;
+    --foreground: #f2f3f3;
+    --raised: #1a1c1d;
+    --active: #25282a;
+    --border: #232527;
+    --rule: #1c1e20;
+    --input: #3d4043;
+    --muted-foreground: #a9adb0;
+    --primary: #f2f3f3;
+    --primary-foreground: #111213;
+    --ring: #4fb3c9;
+    --chart-1: #4fb3c9;
+    --positive: #3fc07a;
+    --negative: #f0687e;
+    --warning: #f0b35a;
+    --pill-positive-bg: #172a1d;
+    --pill-positive-ink: #5fd393;
+    --pill-negative-bg: #2c1a20;
+    --pill-negative-ink: #f58d9e;
+    --pill-warning-bg: #2a2010;
+    --pill-warning-ink: #f0b35a;
+    --pill-warning-edge: #5c4316;
+    --pill-neutral-bg: #25282a;
+    --pill-neutral-ink: #c9cccf;
     color-scheme: dark;
   }
 }
 
-@theme inline {
-  --font-sans: 'Host Grotesk Variable', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Martian Mono Variable', ui-monospace, monospace;
+:root[data-theme='dark'] {
+  --frame: #090a0b;
+  --background: #111213;
+  --foreground: #f2f3f3;
+  --raised: #1a1c1d;
+  --active: #25282a;
+  --border: #232527;
+  --rule: #1c1e20;
+  --input: #3d4043;
+  --muted-foreground: #a9adb0;
+  --primary: #f2f3f3;
+  --primary-foreground: #111213;
+  --ring: #4fb3c9;
+  --chart-1: #4fb3c9;
+  --positive: #3fc07a;
+  --negative: #f0687e;
+  --warning: #f0b35a;
+  --pill-positive-bg: #172a1d;
+  --pill-positive-ink: #5fd393;
+  --pill-negative-bg: #2c1a20;
+  --pill-negative-ink: #f58d9e;
+  --pill-warning-bg: #2a2010;
+  --pill-warning-ink: #f0b35a;
+  --pill-warning-edge: #5c4316;
+  --pill-neutral-bg: #25282a;
+  --pill-neutral-ink: #c9cccf;
+  color-scheme: dark;
+}
 
-  /* Four sizes, no more. */
-  --text-meta: 0.75rem;
-  --text-meta--line-height: 1rem;
+@theme inline {
+  --font-sans: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* Five sizes: small, body, section, title, figure. */
+  --text-small: 0.75rem;
+  --text-small--line-height: 1rem;
   --text-body: 0.875rem;
   --text-body--line-height: 1.25rem;
-  --text-title: 1.125rem;
-  --text-title--line-height: 1.5rem;
-  --text-cue: 2rem;
-  --text-cue--line-height: 2rem;
+  --text-section: 1rem;
+  --text-section--line-height: 1.5rem;
+  --text-title: 1.375rem;
+  --text-title--line-height: 1.75rem;
+  --text-figure: 1.75rem;
+  --text-figure--line-height: 2.25rem;
 
-  --color-ground: var(--k-ground);
-  --color-surface: var(--k-surface);
-  --color-ink: var(--k-ink);
-  --color-ink-2: var(--k-ink-2);
-  --color-rule: var(--k-rule);
-  --color-hover: var(--k-hover);
-  --color-display: var(--k-display);
-  --color-display-ink: var(--k-display-ink);
-  --color-display-ink-2: var(--k-display-ink-2);
-  --color-display-rule: var(--k-display-rule);
-  --color-display-hover: var(--k-display-hover);
-  --color-go: var(--k-go);
-  --color-go-hover: var(--k-go-hover);
-  --color-go-ink: var(--k-go-ink);
-  --color-select: var(--k-select);
-  --color-select-ink: var(--k-select-ink);
-  --color-live: var(--k-live);
-  --color-live-ink: var(--k-live-ink);
-  --color-busy: var(--k-busy);
-  --color-busy-ink: var(--k-busy-ink);
-  --color-fail: var(--k-fail);
-  --color-fail-ink: var(--k-fail-ink);
-  --color-code: var(--k-code);
+  --radius-sheet: 16px;
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --radius-chip: 4px;
+
+  --color-frame: var(--frame);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--background);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--background);
+  --color-popover-foreground: var(--foreground);
+  --color-raised: var(--raised);
+  --color-active: var(--active);
+  --color-accent: var(--raised);
+  --color-accent-foreground: var(--foreground);
+  --color-muted: var(--raised);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-rule: var(--rule);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--negative);
+  --color-chart-1: var(--chart-1);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --color-warning: var(--warning);
+  --color-pill-positive: var(--pill-positive-bg);
+  --color-pill-positive-ink: var(--pill-positive-ink);
+  --color-pill-negative: var(--pill-negative-bg);
+  --color-pill-negative-ink: var(--pill-negative-ink);
+  --color-pill-warning: var(--pill-warning-bg);
+  --color-pill-warning-ink: var(--pill-warning-ink);
+  --color-pill-warning-edge: var(--pill-warning-edge);
+  --color-pill-neutral: var(--pill-neutral-bg);
+  --color-pill-neutral-ink: var(--pill-neutral-ink);
 }
 
 @layer base {
+  * {
+    border-color: var(--border);
+  }
   html {
-    background: var(--k-ground);
-    color: var(--k-ink);
+    background: var(--frame);
+    color: var(--foreground);
     font-family: var(--font-sans);
-    font-size: 100%;
     -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
   }
   body {
-    background: var(--k-ground);
+    background: var(--frame);
     font-size: var(--text-body);
     line-height: var(--text-body--line-height);
   }
   ::selection {
-    background: color-mix(in oklab, var(--k-select) 30%, transparent);
+    background: color-mix(in oklab, var(--chart-1) 25%, transparent);
   }
   :focus-visible {
-    outline: 2px solid var(--k-select);
+    outline: 2px solid var(--ring);
     outline-offset: 2px;
-    border-radius: 3px;
   }
   input,
   select,
   button,
   textarea {
     font: inherit;
-    caret-color: var(--k-select);
   }
-  code,
-  pre,
-  kbd,
-  .font-mono {
-    font-stretch: 87.5%;
-  }
-  a {
-    text-underline-offset: 3px;
-    text-decoration-thickness: 1px;
-  }
-  table {
+  table,
+  .tabular {
     font-variant-numeric: tabular-nums;
   }
   * {
-    scrollbar-color: var(--k-rule) transparent;
+    scrollbar-color: var(--input) transparent;
     scrollbar-width: thin;
-  }
-  dialog::backdrop {
-    background: color-mix(in oklab, var(--k-display) 45%, transparent);
   }
 }
 
-/* The live light lands on its new step: one authored moment, the handover. */
-@keyframes light-land {
+/* The live step lands on its new place in the release track: the one authored moment. */
+@keyframes step-land {
   from {
-    transform: scale(0.3);
-    opacity: 0;
+    transform: scale(0.4);
   }
   60% {
     transform: scale(1.2);
   }
   to {
     transform: scale(1);
-    opacity: 1;
   }
 }
-@keyframes light-blink {
+@keyframes blink {
   50% {
-    opacity: 0.3;
+    opacity: 0.35;
   }
 }
-.light-land {
-  animation: light-land 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  transform-origin: center;
-  transform-box: fill-box;
+.step-land {
+  animation: step-land 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-.light-blink {
-  animation: light-blink 1.1s ease-in-out infinite;
+.blink {
+  animation: blink 1.1s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .light-land,
-  .light-blink {
+  .step-land,
+  .blink {
     animation: none;
   }
 }

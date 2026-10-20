@@ -1,20 +1,46 @@
-import { ChevronsUpDown, LogOut } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, api, type Project } from './api';
-import { Palette, modKey } from './palette';
-import { ProjectPage, type Tab } from './project';
-import { ProjectsPage } from './projects';
-import { SignIn } from './signin';
-import { Kbd, Lamp } from './ui';
+import { ApiError, api, type Project, type ServerStatus } from '@/api';
+import { Boundary } from '@/components/boundary';
+import { Palette } from '@/palette';
+import { ProjectPage, type Tab } from '@/project';
+import { ProjectsPage } from '@/projects';
+import { Shell } from '@/shell';
+import { SignIn } from '@/signin';
 
 export type Navigate = (path: string) => void;
+export type Route = { project?: string; tab: Tab };
 
 export const projectPath = (name: string, tab: Tab = 'overview') =>
   '/p/' + encodeURIComponent(name) + (tab === 'overview' ? '' : '/' + tab);
 
-function route(path: string): { project: string; tab: Tab } | null {
+export function route(path: string): Route {
   const m = /^\/p\/([^/]+)(?:\/(logs|settings))?\/?$/.exec(path);
-  return m ? { project: decodeURIComponent(m[1]), tab: (m[2] as Tab | undefined) ?? 'overview' } : null;
+  return m ? { project: decodeURIComponent(m[1]), tab: (m[2] as Tab | undefined) ?? 'overview' } : { tab: 'overview' };
+}
+
+/** The server's disk, memory and versions, refreshed every minute. */
+function useServer(enabled: boolean) {
+  const [server, setServer] = useState<ServerStatus | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      try {
+        const s = await api.server();
+        if (!stop) setServer(s);
+      } catch {
+        // the page works without it
+      }
+      if (!stop) timer = setTimeout(tick, 60_000);
+    };
+    void tick();
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [enabled]);
+  return server;
 }
 
 export function App() {
@@ -23,6 +49,7 @@ export function App() {
   const [signedOut, setSignedOut] = useState(false);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [palette, setPalette] = useState(false);
+  const server = useServer(!signedOut);
 
   const navigate: Navigate = useCallback((to) => {
     history.pushState(null, '', to);
@@ -58,78 +85,46 @@ export function App() {
   }, []);
 
   const current = route(path);
-  const project = current?.project;
   useEffect(() => {
     void loadProjects();
-  }, [loadProjects, project]);
+  }, [loadProjects, current.project]);
 
   useEffect(() => {
-    document.title = project ? `${project} · kayly` : 'kayly';
-  }, [project]);
+    document.title = current.project ? `${current.project} · kayly` : 'kayly';
+  }, [current.project]);
 
   if (signedOut) return <SignIn onSignedIn={loadProjects} />;
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden">
-      <header className="shrink-0 bg-display text-display-ink">
-        <nav aria-label="Main" className="flex h-12 items-center gap-2 px-3 sm:px-5">
-          <a
-            href="/"
-            onClick={(e) => {
-              e.preventDefault();
-              navigate('/');
-            }}
-            className="flex h-8 items-center gap-2 rounded-[3px] px-2 text-body font-bold tracking-tight text-display-ink no-underline hover:bg-display-hover"
-          >
-            <Lamp state="live" size={12} />
-            kayly
-          </a>
-          <span aria-hidden="true" className="text-display-rule">
-            /
-          </span>
-          <button
-            type="button"
-            onClick={() => setPalette(true)}
-            aria-haspopup="dialog"
-            className="flex h-8 min-w-0 items-center gap-2 rounded-[3px] px-2 text-body text-display-ink transition-colors duration-150 hover:bg-display-hover"
-          >
-            <span className="truncate font-semibold">{project ?? 'Projects'}</span>
-            <ChevronsUpDown size={14} aria-hidden="true" className="shrink-0 text-display-ink-2" />
-            <Kbd className="text-display-ink-2 max-sm:hidden">{modKey}K</Kbd>
-          </button>
-          <button
-            type="button"
-            onClick={() => void api.signOut().then(() => setSignedOut(true))}
-            className="ml-auto inline-flex h-8 items-center gap-2 rounded-[3px] px-2 text-body text-display-ink-2 transition-colors duration-150 hover:bg-display-hover hover:text-display-ink"
-          >
-            <LogOut size={15} aria-hidden="true" />
-            <span className="max-sm:sr-only">Sign out</span>
-          </button>
-        </nav>
-      </header>
-
-      {loadError ? (
-        <main className="p-5">
-          <p role="alert" className="text-fail-ink">
-            Kayly did not answer: {loadError instanceof Error ? loadError.message : String(loadError)}. Reload to try
-            again.
-          </p>
-        </main>
-      ) : current ? (
-        <ProjectPage key={current.project} name={current.project} tab={current.tab} navigate={navigate} onChanged={loadProjects} />
-      ) : (
-        <ProjectsPage projects={projects} navigate={navigate} onCreated={loadProjects} />
-      )}
-
-      {palette && (
-        <Palette
-          projects={projects ?? []}
-          current={current}
-          navigate={navigate}
-          onCreated={loadProjects}
-          onClose={() => setPalette(false)}
-        />
-      )}
-    </div>
+    <Shell
+      projects={projects}
+      server={server}
+      current={current}
+      navigate={navigate}
+      onSearch={() => setPalette(true)}
+      onSignOut={() => void api.signOut().then(() => setSignedOut(true))}
+    >
+      <Boundary resetKey={path}>
+        {loadError ? (
+          <div className="p-6">
+            <p role="alert" className="text-body">
+              Kayly did not answer: {loadError instanceof Error ? loadError.message : String(loadError)}. Reload to try again.
+            </p>
+          </div>
+        ) : current.project ? (
+          <ProjectPage key={current.project} name={current.project} tab={current.tab} navigate={navigate} onChanged={loadProjects} />
+        ) : (
+          <ProjectsPage projects={projects} server={server} navigate={navigate} onCreated={loadProjects} />
+        )}
+      </Boundary>
+      <Palette
+        open={palette}
+        onOpenChange={setPalette}
+        projects={projects ?? []}
+        current={current}
+        navigate={navigate}
+        onCreated={loadProjects}
+      />
+    </Shell>
   );
 }

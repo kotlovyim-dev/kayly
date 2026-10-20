@@ -1,290 +1,113 @@
 ---
 name: kayly
-description: Self-hosted deploy platform; the web UI is a stage manager's prompt book for releases.
+description: Self-hosted deploy platform; the web UI is a framed sheet in the Linear, Vercel and Notion family, built with shadcn/ui.
 colors:
-  desk: "#1b2a5e"
-  desk-ink: "#e8ecfa"
-  desk-ink-2: "#aab5dc"
-  floor: "#eceef2"
+  frame: "#f6f9f9"
   sheet: "#ffffff"
-  ink: "#141b2e"
-  ink-2: "#4c5670"
-  rule: "#d5d9e2"
-  hover: "#f3f5f9"
-  plate: "#1b2a5e"
-  plate-ink: "#ffffff"
-  plate-ink-2: "#c3cbea"
-  action: "#1b2a5e"
-  action-hover: "#26397c"
-  action-ink: "#ffffff"
-  go: "#2e9e5b"
-  go-ink: "#1a6b3d"
-  standby: "#e8a317"
-  standby-ink: "#855700"
-  fail: "#d2402f"
-  fail-ink: "#b42318"
-  focus: "#3d63dd"
-  code: "#f4f6fa"
-  tape-pink: "#ff3d8b"
-  tape-yellow: "#f5d800"
-  tape-green: "#38c96a"
-  tape-blue: "#2f7bff"
-  tape-orange: "#ff7a1a"
-  tape-violet: "#9b5cff"
-  tape-cyan: "#00b8c4"
+  raised: "#f4f6f8"
+  active: "#ebedee"
+  border: "#e8eaec"
+  rule: "#f0f1f2"
+  control: "#cdced1"
+  text: "#131416"
+  muted: "#5d5f60"
+  primary: "#131416"
+  data: "#1b6c80"
+  positive: "#1e7b4f"
+  negative: "#c4242a"
+  warning: "#92400e"
+  pill-positive: "#dcfae5 / #04250e"
+  pill-negative: "#ffedea / #831c1e"
+  pill-warning: "#fffbeb / #92400e, edge #fde68a"
+  pill-neutral: "#ebedee / #353736"
+dark:
+  frame: "#090a0b"
+  sheet: "#111213"
+  raised: "#1a1c1d"
+  active: "#25282a"
+  border: "#232527"
+  text: "#f2f3f3"
+  muted: "#a9adb0"
+  primary: "#f2f3f3"
+  data: "#4fb3c9"
 typography:
-  cue:
-    fontFamily: "Atkinson Hyperlegible Mono Variable, ui-monospace, monospace"
-    fontSize: "2rem"
-    fontWeight: 700
-    lineHeight: "2rem"
-    letterSpacing: "-0.025em"
-  title:
-    fontFamily: "Atkinson Hyperlegible Next Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "1.1875rem"
-    fontWeight: 700
-    lineHeight: "1.5rem"
-  body:
-    fontFamily: "Atkinson Hyperlegible Next Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "0.9375rem"
-    fontWeight: 400
-    lineHeight: "1.375rem"
-  meta:
-    fontFamily: "Atkinson Hyperlegible Next Variable, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "0.8125rem"
-    fontWeight: 400
-    lineHeight: "1.125rem"
-  mono:
-    fontFamily: "Atkinson Hyperlegible Mono Variable, ui-monospace, monospace"
-    fontSize: "0.8125rem"
-    fontWeight: 400
-    lineHeight: "1.125rem"
+  sans: "IBM Plex Sans Variable, 400/500/600"
+  mono: "IBM Plex Mono 400/500, for release numbers, SHAs, env keys, hostnames and commands only"
+  sizes: "small 12/16 · body 14/20 · section 16/24 · title 22/28 · figure 28/36"
 rounded:
-  tape: "1px"
-  sm: "4px"
-  md: "6px"
-  lg: "8px"
+  chip: "4px"
+  control: "6px"
+  card: "8px"
+  sheet: "16px"
 spacing:
-  xs: "4px"
-  sm: "8px"
-  md: "12px"
-  lg: "16px"
-  xl: "20px"
-components:
-  desk-bar:
-    backgroundColor: "{colors.desk}"
-    textColor: "{colors.desk-ink}"
-    height: "48px"
-    padding: "0 24px"
-  button-primary:
-    backgroundColor: "{colors.action}"
-    textColor: "{colors.action-ink}"
-    typography: "{typography.body}"
-    rounded: "{rounded.md}"
-    padding: "0 14px"
-    height: "36px"
-  button-primary-hover:
-    backgroundColor: "{colors.action-hover}"
-  button-quiet:
-    backgroundColor: "{colors.sheet}"
-    textColor: "{colors.ink}"
-    typography: "{typography.body}"
-    rounded: "{rounded.md}"
-    padding: "0 14px"
-    height: "36px"
-  button-quiet-hover:
-    backgroundColor: "{colors.hover}"
-  button-danger:
-    backgroundColor: "{colors.sheet}"
-    textColor: "{colors.fail-ink}"
-    rounded: "{rounded.md}"
-    padding: "0 14px"
-    height: "36px"
-  button-small:
-    typography: "{typography.meta}"
-    rounded: "{rounded.md}"
-    padding: "0 10px"
-    height: "32px"
-  standby-go-armed:
-    backgroundColor: "{colors.standby}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.md}"
-    height: "36px"
-  icon-button:
-    textColor: "{colors.ink-2}"
-    rounded: "{rounded.md}"
-    size: "32px"
-  input:
-    backgroundColor: "{colors.sheet}"
-    textColor: "{colors.ink}"
-    typography: "{typography.body}"
-    rounded: "{rounded.md}"
-    padding: "0 12px"
-    height: "36px"
-  sheet:
-    backgroundColor: "{colors.sheet}"
-    rounded: "{rounded.lg}"
-    padding: "8px 16px"
-  release-row-live:
-    backgroundColor: "{colors.plate}"
-    textColor: "{colors.plate-ink}"
-    padding: "10px 12px"
-  command:
-    backgroundColor: "{colors.code}"
-    textColor: "{colors.ink}"
-    typography: "{typography.mono}"
-    rounded: "{rounded.md}"
-    padding: "4px 4px 4px 12px"
-  spike-strip:
-    rounded: "{rounded.tape}"
-    width: "22px"
-    height: "7px"
+  base: "4px"
+  gap: "24px"
+  pad: "24px (16px on a phone)"
+  control: "32px; 36px for form inputs"
+  row: "48px"
+  sidebar: "228px"
+  top-bar: "48px"
 ---
 
-# Design System: kayly
+# Design system: kayly
 
 ## Overview
 
-**Creative North Star: "The Prompt Book"**
+**The framed sheet.** A tinted L-shaped frame holds the sidebar and the top bar with no line between them; the work sits on one white sheet inset 8px from the window's right and bottom edges, with a 1px edge, 16px corners and no shadow. It is the structure of Linear and Vercel, with Notion's quiet type: one grotesk, sentence case, grey for what is secondary.
 
-Every release is a cue in a stage manager's prompt book: it stands by until it proves itself, then goes, and the previous one bows out. The interface is a running-light blue prompt-desk bar over a cool rehearsal-floor grey. The work sits on white sheets, cue lamps report state, and a short strip of spike tape marks each project.
+Colour goes on data and state, not on chrome. The chrome is grey; the one primary action is near-black; the data hue (a deep teal) marks the release that is live; green, amber and red mark live, in progress and failed. Under 3% of the pixels on any screen carry a hue.
 
-The system is dense, quiet and data-first. One workhorse family in two widths (Atkinson Hyperlegible Next and Mono) carries everything at four sizes. Colour is scarce. Blue belongs to the desk, the primary action and the single reversed plate. Green, amber and red belong to the lamps and their ink. The fluorescent tape colours appear only on spike strips. Depth comes from rules and the sheet-on-floor contrast, never from shadows.
+The components are [shadcn/ui](https://ui.shadcn.com) (Radix primitives, `class-variance-authority`), copied into `web/src/components/ui/` and themed through the tokens in `web/src/styles.css`. The art direction comes from the `design-taste-frontend` skill's app run (style `framed-sheet`), checked with its inspector at 1440, 768 and 390px.
 
-Motion is limited to one authored moment: the go lamp landing on its new row when a release hands over. Everything else is a 150 ms colour transition.
-
-**Key Characteristics:**
-- A blue desk bar on top, a grey floor below, white sheets for primary work, and ruled quiet sections for supporting work.
-- Cue lamps whose state reads from shape as well as colour.
-- Spike-tape strips derived from the project name.
-- Four type sizes, two widths of one family.
-- A two-press standby-then-go call before any action that changes what is live or deletes configuration.
-- Flat, ruled, 1px borders; no shadows.
+**Key characteristics**
+- One frame tint, one white sheet, 1px edges, no shadow on anything at rest.
+- Each screen answers one question first, in the line under its title ("r13 failed 38 minutes ago: … r12 kept serving.").
+- State reads from shape as well as colour: dots are filled, ringed, struck or hollow, and every pill carries its word.
+- Anything a developer types or copies is in IBM Plex Mono; everything else is IBM Plex Sans.
+- Standby-then-go before anything that changes what is live or deletes a value.
 
 ## Colors
 
-The palette is cool and restrained. Running-light blue does the structural work, signal colours are reserved for state, and fluorescent tape is reserved for identity.
+- **Frame** (`frame`): the sidebar and top bar, one low-chroma step of the data teal. The phone's top bar keeps it.
+- **Sheet** (`sheet`): the page. Cards on it are the sheet's white with a `border` edge; settings panels are `raised`.
+- **Lines in three steps:** `border` for card edges, `rule` (lighter) between rows, `control` (darker) on inputs and outlined buttons.
+- **Text in two greys:** `text`, then `muted` for labels, sublines and timestamps; both reach 4.5:1 on the sheet and the frame.
+- **Primary** (`primary`): near-black fill, white label. One per screen: Redeploy, or "Why r13 failed" when the newest release failed.
+- **Data** (`data`): the live step of the release track and the mark. Nothing else.
+- **Status pairs:** pale tint with dark ink of the same hue, for pills; the full `positive`, `negative` and `warning` for dots and single words.
 
-### Primary
-- **Running-Light Blue** (desk / plate / action): the prompt-desk bar, the primary button, the live release plate, and the selected log tab. In dark mode the desk keeps the same blue. The plate and action step up to a brighter blue (#2a3f8f / #3a56c4) so they stay visible against a neutral ground.
-- **Desk Ink** (desk-ink, desk-ink-2): the wordmark and project switcher on the desk; the secondary tone is for sign out and other quiet desk controls.
-- **Focus Blue** (focus): focus outline, caret and selection tint. It is used for nothing else.
+Dark mode follows the system, or the owner's choice in the account menu (remembered in the browser). It uses true neutral darks, not navy; the data hue lifts to `#4fb3c9`.
 
-### Secondary
-- **Go Green** (go, go-ink): the live lamp fill; the ink tone is for success text such as the "copied" check.
-- **Standby Amber** (standby, standby-ink): the standby ring lamp and the armed standby-then-go control (15% tint fill, amber border).
-- **Fail Red** (fail, fail-ink): the struck failed lamp, failure status words, danger button text and invalid input borders.
-
-### Tertiary
-- **Spike Tape** (tape-pink, tape-yellow, tape-green, tape-blue, tape-orange, tape-violet, tape-cyan): one is picked by a hash of the project name. These colours appear only on the spike strip.
-
-### Neutral
-- **Rehearsal Floor** (floor): the page ground. In dark mode this is a neutral grey (#141518), not blue.
-- **Sheet White** (sheet): full sheets, buttons, inputs.
-- **Ink** (ink, ink-2): primary text, then meta text, labels, table headers and timestamps.
-- **Rule** (rule): every border and divider, plus the scrollbar thumb.
-- **Hover** (hover): row and quiet-button hover wash.
-- **Code Ground** (code): command boxes and the log pane.
-
-### Named Rules
-**The Lamp Colour Rule.** Green, amber and red mean live, standby and failed. They are never used to decorate.
-
-**The Neutral Ground Rule.** In dark mode the blue stays on the desk and the plate. The floor, sheets and rules are neutral greys.
-
-**The Tape Is Identity Rule.** Fluorescent tape colours appear only on spike strips. They never carry state.
+**Rules.** No gradients, glows or glass. No violet or indigo. No colour on chrome: the active nav item is a grey pill, the active tab a 2px ink underline. Status colours mean status and nothing else.
 
 ## Typography
 
-**Body Font:** Atkinson Hyperlegible Next Variable (fallbacks: ui-sans-serif, system-ui)
-**Label/Mono Font:** Atkinson Hyperlegible Mono Variable (fallback: ui-monospace)
-
-**Character:** A legibility-first workhorse used at two widths. Mono is used for anything a user might type or copy: release numbers, env keys, hostnames, commands and logs.
-
-### Hierarchy
-- **Cue** (700, 2rem/2rem, tight tracking): the largest type on any page. It is used for the live release number in mono beside its go lamp, and for the sign-in wordmark.
-- **Title** (700, 1.1875rem/1.5rem): the project name beside its spike strip and the desk wordmark.
-- **Body** (400; 600 for buttons, 700 for sheet headings, 15px/22px): running text, table cells and controls. Prose is capped at 62ch.
-- **Meta** (400 or 600, 0.8125rem/1.125rem): field labels, hints, table headers, timestamps, small buttons, commands and logs.
-
-### Named Rules
-**The Four Sizes Rule.** There are exactly four type sizes: meta, body, title and cue. Express hierarchy through weight (400/600/700) and the mono width, never through a fifth size.
-
-**The Sentence Case Rule.** Every label, heading and button uses plain sentence case, with no uppercase tracking. A heading names its sheet and nothing restates it.
+IBM Plex Sans for everything, IBM Plex Mono for one job (release numbers, SHAs, env keys, hostnames, commands, logs). Five sizes: small 12, body 14, section 16, title 22, figure 28. Weights 400, 500 and 600; 600 for titles and the active label. Sentence case everywhere; no tracked capitals. Tabular figures on every number that is compared or updates.
 
 ## Layout
 
-The desk bar is sticky and 48px tall. The page is capped at 1440px wide, with 16px gutters (24px from `sm`). On a project page, a header row carries the spike strip, name, the live cue number, service links and Redeploy on the right. Below it sits a two-column grid at `lg` (1024px): the work column (`minmax(0,1fr)`) holds Releases and then Logs. The support column (320 to 400px) holds Add-ons, Env values, Domains and Database backups. Under `lg` the columns stack. On mobile, the "When" column folds under the release number and Redeploy stretches to full width.
-
-The rhythm is a 4px base. Sheets and sections are 20px apart. Sheet content is inset 16px. List rows are at least 44px tall and sheet headers at least 48px. Controls are 36px tall (32px for small ones).
-
-## Elevation & Depth
-
-The system is flat. No element casts a shadow. Depth comes from three layers: the grey floor, white sheets with a 1px rule border, and the blue desk and plate as the only reversed surfaces. Quiet sections lie on the floor itself, separated only by a top rule.
-
-### Named Rules
-**The Ruled Not Raised Rule.** Separate surfaces with 1px rules and the sheet-against-floor contrast. Do not add box-shadows.
-
-**The One Plate Rule.** The live release row is the only reversed row in the interface. The selected tab of the log service switcher uses the same plate colour as a selection state, but no other row or card is ever reversed.
-
-## Shapes
-
-Corners are small and practical: 8px for sheets, 6px for buttons, inputs, command boxes and tab groups, 4px for focus outlines and tab segments. Spike strips are 22 by 7px, with a 1px corner and a -6 degree tilt, like tape laid by hand. Lamps are 12px SVG discs (14px in the wordmark, 18px beside the cue number).
+- **Desktop (≥1024px):** a 228px sidebar and a 48px top bar on the frame; the sheet fills the rest, inset 8px right and bottom. Inside the sheet: 24px padding, the title row, the underline tabs on a full-width rule, then the content.
+- **Grid:** one 24px gap, horizontally and vertically. The overview's second row is three columns: releases span two, services and add-ons take one (at 1440px: 1440 − 228 sidebar − 8 inset − 2 × 24 padding = 1156 = 3 × 369.3 + 2 × 24).
+- **Settings:** each section is a row: title and description on the left (18rem), a `raised` panel with 16px corners on the right; sections split by a full-width rule.
+- **Phone:** the frame disappears; the sheet is the screen, under a 48px bar with the menu button (the sidebar opens as a sheet), the page name and search. Tables become two-line rows; the live card's facts become label-value rows; title actions stretch to full width.
 
 ## Components
 
-### Buttons
-Buttons are plain and firm: semibold body text on a 36px, 6px-radius box with a 1px border.
-- **Primary:** action blue with white ink. The border is transparent and hover deepens to action-hover. Use it for the one forward action in a context; Redeploy becomes primary only when pending values need a redeploy.
-- **Quiet (default):** sheet ground, ink text and a rule border; hover washes to hover.
-- **Danger:** sheet ground with fail-ink text; on hover the border turns fail red.
-- **Small:** 32px tall, 10px horizontal padding, meta size. Use it in rows and sheet headers.
-- **Busy / disabled:** a spinning loader icon, 55% opacity, not-allowed cursor.
-- **Icon button:** a 32px square with ink-2 icons (16px Lucide SVG). It has a hover wash and always an accessible name.
+- **Button** (shadcn): `default` (near-black primary), `outline`, `ghost`, `destructive`; 32px, `sm` 28px, `lg` 40px; 6px corners. Busy shows a spinner and blocks presses.
+- **Standby-then-go** (`ArmButton`): the first press arms it (amber tint, blinking dot, the label rewritten to the exact outcome: "Go: r11 live"); the second press within four seconds runs it; Escape, blur or the timeout stands it down. Used for redeploy, rollback, deleting an env value and removing a domain. Removing an add-on deletes data and asks for the typed project name instead.
+- **Status dot and pill** (`StatusDot`, `StatusBadge`): live filled, in progress a blinking ring, failed struck through, previous hollow, off a faint dot. Pills are 20px, pale tint and dark ink.
+- **Release track** (signature): one 20px step per release, oldest to newest; the live one filled in the data hue, failed ones struck in red, previous ones hollow (darker while their image is kept for rollback). It sits in the live-release card; a step opens that release. When a release goes live its step lands (scale 0.4 → 1.2 → 1 over 420ms); this and the blink stop under reduced motion.
+- **Panel:** a card with a 48px header (title, optional count, optional action) over its rows. Rows are 48px with `rule` dividers, no zebra, no header band; numbers right-aligned. A panel keeps its own height.
+- **Release sheet:** a side sheet (shadcn `Sheet`) with one release: created, commit, the failure reason on the negative tint, rollback, and its deploy log.
+- **Command palette** (shadcn `Command` on cmdk): ⌘K / Ctrl K from anywhere: projects, the current project's tabs, and "Create project" for a valid new name.
+- **Command line:** a `raised` box with one mono command and a copy button, wherever the next step is the CLI's job.
 
-### Standby-then-go (signature)
-This is the stage manager's call. The first press arms the control: an amber border, a 15% amber fill and a blinking standby lamp, with the label rewritten to state exactly what will go ("Go: r9 live"). A second press within 4 seconds runs the action. Escape, blur or the timeout stands it down. It is used for roll back, redeploy, and deleting an env value or domain. Removing an add-on deletes data and needs a typed project name instead.
+## Do and don't
 
-### Cue Lamp (signature)
-State is carried by shape as well as colour:
-- **Live:** a filled green disc with a soft halo.
-- **Standby:** an amber ring that blinks at 1.1s.
-- **Failed:** a red disc struck through.
-- **Superseded:** a hollow ring at 55% opacity.
-- **Off:** a grey disc at 28% opacity.
-
-When a release goes live, its go lamp lands on the new row (scale 0.4 to 1.25 to 1 over 420 ms, `cubic-bezier(0.16, 1, 0.3, 1)`). Both animations stop under reduced motion.
-
-### Cards / Containers
-- **Sheet:** white ground, 1px rule border and 8px corners. The header row is at least 48px tall, with a bold body-size title and an optional action on the right, above a rule. Use it for primary work: Releases, Logs and the project list.
-- **Quiet sheet:** a top rule only, lying on the floor, with the same header. Use it for supporting sections in the right column.
-- **Release cue sheet:** a table with a lamp column, mono release number, when, status and an action. Rows are divided by rules and wash on hover. The live row is the plate.
-
-### Inputs / Fields
-- **Style:** 36px tall, sheet ground, 1px rule border, 6px corners, 12px padding. The border darkens toward ink-2 on hover.
-- **Focus:** the border turns focus blue, with a 2px focus outline at 40% opacity.
-- **Error:** an invalid field gets a fail-red border. An error note shows the message in semibold fail-ink, then the next step in ink-2.
-- **Field:** a semibold meta label above the control and an optional meta hint below it.
-
-### Navigation
-The desk bar holds the wordmark (live lamp plus "kayly" at title size, bold) on the left. Next to it is a project switcher: a 32px select on the desk with a 20% desk-ink border. Sign out sits on the right in desk-ink-2 and collapses to its icon on small screens. There is no sidebar.
-
-### Command
-A code-ground box with 6px corners holds a single-line mono command and a copy icon button. Use it wherever the next step is a CLI command.
-
-## Do's and Don'ts
-
-### Do:
-- **Do** mark every project with its spike strip, using the colour derived from the name.
-- **Do** carry lamp state through shape as well as colour (filled, ringed, struck, hollow, grey disc).
-- **Do** gate roll back, redeploy and env/domain deletion behind standby-then-go, with a go label that names the exact outcome.
-- **Do** put primary work on full sheets and supporting work in quiet sections on the floor.
-- **Do** set anything a user types or copies in Atkinson Hyperlegible Mono.
-- **Do** keep transitions to 150 ms colour changes and respect reduced motion.
-
-### Don't:
-- **Don't** add a fifth type size.
-- **Don't** reverse any row other than the live release.
-- **Don't** use box-shadows; separate surfaces with 1px rules.
-- **Don't** put blue on the floor or the sheets in dark mode; keep blue on the desk, plate and action.
-- **Don't** use lamp green, amber or red, or spike-tape colours, for decoration.
-- **Don't** use a dark sidebar with a grid of project cards; projects are a ruled list on a sheet.
+- **Do** answer the screen's question in the line under its title, and put its main job one click away.
+- **Do** carry state in shape and words as well as colour.
+- **Do** say plainly when something is the CLI's job, with the exact command.
+- **Don't** put a shadow on anything at rest; shadows are for dialogs, sheets and menus.
+- **Don't** colour chrome, tabs or nav; don't use the data hue for anything but the live release.
+- **Don't** add icons in tinted squares, sparklines, KPI tiles or a hero header.
+- **Don't** stretch a card over empty space; let it keep its height and pair blocks instead.

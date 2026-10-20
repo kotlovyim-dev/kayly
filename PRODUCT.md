@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-UI: React 19, Vite 8, Tailwind v4, TypeScript, built into `web/dist` and embedded in the Go binary with `go:embed`; served by the Kayly daemon behind Caddy at the Kayly host. No external requests at runtime (fonts and assets are bundled), because Kayly runs on servers people own.
+UI: React 19, Vite 8, Tailwind v4, shadcn/ui (Radix), TypeScript, built into `web/dist` and embedded in the Go binary with `go:embed`; served by the Kayly daemon behind Caddy at the Kayly host. No external requests at runtime (fonts and assets are bundled), because Kayly runs on servers people own.
 
 ## Users
 
@@ -57,7 +57,7 @@ No logo, screenshots, testimonials or customer names exist. The two real apps (t
 
 1. The live release is sacred: the UI makes it obvious what is live, and nothing destructive happens without an explicit, specific confirmation.
 2. Show the next action, not the system: every state (empty, failed, missing value) says what to do next, often as the exact CLI command.
-3. Dense, quiet, fast: a project fits the window in three tabs (Overview, Logs, Settings) and the page never scrolls; no decorative text, data first.
+3. Dense, quiet, fast: a project lives in three tabs (Overview, Logs, Settings), and its first screen shows what is live, the newest releases, the services and the add-ons without scrolling on a laptop; no decorative text, data first.
 4. Honest about limits: when something is the CLI's job, say so plainly instead of hiding it.
 
 ## Accessibility & Inclusion

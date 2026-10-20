@@ -1,22 +1,18 @@
 import { Download, Trash2 } from 'lucide-react';
-import { type SubmitEvent, useCallback, useEffect, useState } from 'react';
-import { api, type Addon, type AddonKind, type Backup, type ProjectDetail } from './api';
-import {
-  ArmGo,
-  Button,
-  CopyButton,
-  ErrorNote,
-  IconButton,
-  Lamp,
-  type LampState,
-  Pane,
-  Select,
-  TextInput,
-  When,
-  formatBytes,
-} from './ui';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { api, type Addon, type AddonKind, type Backup, type ProjectDetail } from '@/api';
+import { ArmButton } from '@/components/arm-button';
+import { CopyButton } from '@/components/copy';
+import { ErrorNote, When } from '@/components/common';
+import { StatusBadge } from '@/components/status';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { backupLabel, formatBytes } from '@/lib/format';
 
-/** Settings: everything Kayly keeps for the project, on one screen. */
+/** Settings: everything Kayly keeps for the project, one section per row. */
 export function Settings({
   detail,
   onChanged,
@@ -27,50 +23,85 @@ export function Settings({
   onChanged: () => void;
   onDomainsChanged: () => void;
 }) {
-  const hasAddons = detail.addons.length > 0;
   return (
-    <div className="grid gap-3 sm:gap-5 lg:h-full lg:grid-cols-2">
-      <div className="flex min-h-0 flex-col gap-3 sm:gap-5">
+    <div className="flex flex-col">
+      <Section
+        id="addons"
+        title="Add-ons"
+        description="A database next to your services, on the project's own network. Its URL reaches every service on the next deploy."
+      >
         <Addons name={detail.name} addons={detail.addons} onChanged={onChanged} />
+      </Section>
+      <Section
+        id="env"
+        title="Env values"
+        description={
+          <>
+            Values for the keys declared in <code className="font-mono">kayly.toml</code>. Stored encrypted, never shown again, and
+            delivered on the next deploy only to the services each key is scoped to.
+          </>
+        }
+      >
         <Env name={detail.name} keys={detail.env_keys} onChanged={onChanged} />
-      </div>
-      <div className="flex min-h-0 flex-col gap-3 sm:gap-5">
-        <Domains detail={detail} onChanged={onDomainsChanged} className={hasAddons ? 'max-lg:shrink-0 lg:max-h-[45%]' : 'max-lg:shrink-0 lg:flex-1'} />
-        {hasAddons && <Backups name={detail.name} />}
-      </div>
+      </Section>
+      <Section
+        id="domains"
+        title="Domains"
+        description="Every service with a port already has an sslip.io address. A custom domain needs an A record pointing at this server; HTTPS follows once DNS resolves."
+      >
+        <Domains detail={detail} onChanged={onDomainsChanged} />
+      </Section>
+      {detail.addons.length > 0 && (
+        <Section
+          id="backups"
+          title="Backups"
+          description="Postgres before every release step and daily; Redis and volumes daily. The last 14 of each are kept on this server."
+        >
+          <Backups name={detail.name} />
+        </Section>
+      )}
     </div>
   );
 }
+
+function Section({ id, title, description, children }: { id: string; title: string; description: ReactNode; children: ReactNode }) {
+  return (
+    <section aria-labelledby={id} className="grid gap-4 border-b py-8 first:pt-2 last:border-b-0 md:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] md:gap-10">
+      <div className="flex flex-col gap-1.5 md:pt-1.5">
+        <h2 id={id} className="text-section font-medium">
+          {title}
+        </h2>
+        <p className="text-body text-muted-foreground">{description}</p>
+      </div>
+      <div className="flex min-w-0 flex-col gap-4 rounded-sheet bg-raised p-4">{children}</div>
+    </section>
+  );
+}
+
+/** A list inside a settings panel: white rows on the panel's tint. */
+function Rows({ children }: { children: ReactNode }) {
+  return <ul className="flex flex-col overflow-hidden rounded-card border bg-background">{children}</ul>;
+}
+
+const row = 'flex min-h-12 items-center gap-3 border-b border-rule px-3 last:border-b-0';
 
 const addonInfo: Record<AddonKind, { label: string; gives: string }> = {
   postgres: { label: 'Postgres', gives: 'DATABASE_URL' },
   redis: { label: 'Redis', gives: 'REDIS_URL' },
 };
 
-function addonLamp(a: Addon): LampState {
-  if (a.status === 'healthy') return 'live';
-  if (a.status === 'starting') return 'standby';
-  return 'failed';
-}
-
 function Addons({ name, addons, onChanged }: { name: string; addons: Addon[]; onChanged: () => void }) {
   return (
-    <Pane id="addons" title="Add-ons" className="shrink-0">
-      <ul>
-        {(['postgres', 'redis'] as const).map((kind) => {
-          const a = addons.find((x) => x.kind === kind);
-          return (
-            <li key={kind} className="border-b border-rule last:border-b-0">
-              {a ? (
-                <AttachedAddon name={name} addon={a} onChanged={onChanged} />
-              ) : (
-                <AvailableAddon name={name} kind={kind} onChanged={onChanged} />
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </Pane>
+    <Rows>
+      {(['postgres', 'redis'] as const).map((kind) => {
+        const a = addons.find((x) => x.kind === kind);
+        return a ? (
+          <AttachedAddon key={kind} name={name} addon={a} onChanged={onChanged} />
+        ) : (
+          <AvailableAddon key={kind} name={name} kind={kind} onChanged={onChanged} />
+        );
+      })}
+    </Rows>
   );
 }
 
@@ -79,17 +110,17 @@ function AvailableAddon({ name, kind, onChanged }: { name: string; kind: AddonKi
   const [error, setError] = useState<unknown>(null);
   const info = addonInfo[kind];
   return (
-    <div className="flex flex-col gap-2 px-4 py-2.5">
+    <li className="flex flex-col gap-2 border-b border-rule px-3 py-2.5 last:border-b-0">
       <div className="flex items-center gap-3">
-        <Lamp state="off" />
         <div className="min-w-0 flex-1">
-          <p className="font-semibold">{info.label}</p>
-          <p className="text-meta text-ink-2">
+          <p className="font-medium">{info.label}</p>
+          <p className="text-small text-muted-foreground">
             Services get <code className="font-mono">{info.gives}</code>
           </p>
         </div>
         <Button
-          small
+          variant="outline"
+          size="sm"
           busy={busy}
           onClick={async () => {
             setBusy(true);
@@ -108,7 +139,7 @@ function AvailableAddon({ name, kind, onChanged }: { name: string; kind: AddonKi
         </Button>
       </div>
       <ErrorNote error={error} />
-    </div>
+    </li>
   );
 }
 
@@ -118,8 +149,9 @@ function AttachedAddon({ name, addon, onChanged }: { name: string; addon: Addon;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const info = addonInfo[addon.kind];
+  const tone = addon.status === 'healthy' ? 'positive' : addon.status === 'starting' ? 'warning' : 'negative';
 
-  async function remove(e: SubmitEvent<HTMLFormElement>) {
+  async function remove(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
@@ -133,41 +165,51 @@ function AttachedAddon({ name, addon, onChanged }: { name: string; addon: Addon;
   }
 
   return (
-    <div className="flex flex-col gap-3 px-4 py-2.5">
+    <li className="flex flex-col gap-3 border-b border-rule px-3 py-2.5 last:border-b-0">
       <div className="flex items-center gap-3">
-        <Lamp state={addonLamp(addon)} />
         <div className="min-w-0 flex-1">
-          <p className="font-semibold">
-            {info.label} <span className="font-normal text-ink-2">{addon.status}</span>
+          <p className="flex items-center gap-2 font-medium">
+            {info.label}
+            <StatusBadge tone={tone}>{addon.status[0].toUpperCase() + addon.status.slice(1)}</StatusBadge>
           </p>
-          <p className="text-meta text-ink-2">
-            <code className="font-mono">{addon.env_var}</code> since <When at={addon.created_at} />
+          <p className="text-small text-muted-foreground" title={addon.image}>
+            <code className="font-mono">{addon.env_var}</code> · since <When at={addon.created_at} />
           </p>
         </div>
-        <CopyButton text={addon.url} label={`Copy ${addon.env_var}`} />
-        <IconButton label={`Remove ${info.label}`} onClick={() => setRemoving((v) => !v)} aria-expanded={removing}>
-          <Trash2 size={16} />
-        </IconButton>
+        {addon.url && <CopyButton text={addon.url} label={`Copy ${addon.env_var}`} />}
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={`Remove ${info.label}`}
+          title={`Remove ${info.label}`}
+          aria-expanded={removing}
+          onClick={() => setRemoving((v) => !v)}
+          className="size-7 text-muted-foreground hover:text-negative"
+        >
+          <Trash2 />
+        </Button>
       </div>
       {removing && (
-        <form onSubmit={remove} className="flex flex-col gap-2 rounded-[3px] border border-fail/50 p-3">
-          <p className="text-meta">
-            This deletes {info.label} and all its data. Backups stay. Type <strong className="font-mono">{name}</strong> to
-            confirm.
+        <form onSubmit={remove} className="flex flex-col gap-2 rounded-card bg-pill-negative p-3">
+          <p className="text-body text-pill-negative-ink">
+            This deletes {info.label} and all its data. Backups stay. Type <strong className="font-mono">{name}</strong> to confirm.
           </p>
           <div className="flex gap-2">
-            <label className="min-w-0 flex-1">
-              <span className="sr-only">Project name</span>
-              <TextInput value={confirm} onChange={(e) => setConfirm(e.target.value)} className="font-mono" autoFocus />
-            </label>
-            <Button type="submit" variant="danger" busy={busy} disabled={confirm !== name}>
+            <Input
+              aria-label="Project name"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              className="font-mono"
+              autoFocus
+            />
+            <Button type="submit" variant="destructive" busy={busy} disabled={confirm !== name}>
               Delete {info.label}
             </Button>
           </div>
           <ErrorNote error={error} />
         </form>
       )}
-    </div>
+    </li>
   );
 }
 
@@ -177,7 +219,7 @@ function Env({ name, keys, onChanged }: { name: string; keys: string[]; onChange
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
-  async function submit(e: SubmitEvent<HTMLFormElement>) {
+  async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
@@ -194,54 +236,45 @@ function Env({ name, keys, onChanged }: { name: string; keys: string[]; onChange
   }
 
   return (
-    <Pane id="env" title="Env values" className="max-lg:shrink-0 lg:flex-1">
-      <form onSubmit={submit} className="flex flex-col gap-2 border-b border-rule p-3">
-        <div className="flex gap-2">
-          <label className="min-w-0 flex-1">
-            <span className="sr-only">Key</span>
-            <TextInput
-              value={key}
-              onChange={(e) => setKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
-              placeholder="KEY"
-              required
-              className="font-mono"
-            />
-          </label>
-          <label className="min-w-0 flex-1">
-            <span className="sr-only">Value</span>
-            <TextInput
-              type="password"
-              autoComplete="off"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder="value"
-              className="font-mono"
-            />
-          </label>
-          <Button type="submit" busy={busy}>
-            Set
-          </Button>
+    <>
+      <form onSubmit={submit} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="env-key">Key</Label>
+          <Input
+            id="env-key"
+            value={key}
+            onChange={(e) => setKey(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
+            placeholder="SMTP_URL"
+            required
+            className="font-mono"
+          />
         </div>
-        <ErrorNote error={error} />
-        <span className="text-meta text-ink-2">Stored encrypted and never shown again. Applies on the next deploy.</span>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="env-value">Value</Label>
+          <Input id="env-value" type="password" autoComplete="off" value={value} onChange={(e) => setValue(e.target.value)} className="font-mono" />
+        </div>
+        <Button type="submit" busy={busy} variant="outline" className="h-9">
+          Set value
+        </Button>
       </form>
+      <ErrorNote error={error} />
       {keys.length === 0 ? (
-        <p className="px-4 py-3 text-meta text-ink-2">No values yet.</p>
+        <p className="text-body text-muted-foreground">No values yet. Kayly lists the keys it still needs when you deploy.</p>
       ) : (
-        <ul>
+        <Rows>
           {keys.map((k) => (
-            <li key={k} className="flex min-h-11 items-center gap-2 border-b border-rule pr-3 pl-4 last:border-b-0">
-              <code className="min-w-0 flex-1 truncate font-mono text-meta">{k}</code>
-              <ArmGo small label="Delete" go="Go: delete" onGo={() => void api.deleteEnv(name, k).then(onChanged, setError)} />
+            <li key={k} className={row}>
+              <code className="min-w-0 flex-1 truncate font-mono text-body">{k}</code>
+              <ArmButton variant="ghost" size="sm" label="Delete" go={`Go: delete ${k}`} onGo={() => void api.deleteEnv(name, k).then(onChanged, setError)} />
             </li>
           ))}
-        </ul>
+        </Rows>
       )}
-    </Pane>
+    </>
   );
 }
 
-function Domains({ detail, onChanged, className }: { detail: ProjectDetail; onChanged: () => void; className: string }) {
+function Domains({ detail, onChanged }: { detail: ProjectDetail; onChanged: () => void }) {
   const services = detail.services.filter((s) => s.port);
   const [host, setHost] = useState('');
   const [service, setService] = useState('');
@@ -249,7 +282,7 @@ function Domains({ detail, onChanged, className }: { detail: ProjectDetail; onCh
   const [error, setError] = useState<unknown>(null);
   const [added, setAdded] = useState<string | null>(null);
 
-  async function submit(e: SubmitEvent<HTMLFormElement>) {
+  async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
@@ -265,84 +298,66 @@ function Domains({ detail, onChanged, className }: { detail: ProjectDetail; onCh
     }
   }
 
+  if (services.length === 0) {
+    return <p className="text-body text-muted-foreground">Domains point at a service with a port. Deploy one first.</p>;
+  }
   return (
-    <Pane id="domains" title="Domains" className={className}>
-      {services.length === 0 ? (
-        <p className="px-4 py-3 text-meta text-ink-2">Domains point at a service with a port. Deploy one first.</p>
-      ) : (
-        <form onSubmit={submit} className="flex flex-col gap-2 border-b border-rule p-3">
-          <div className="flex gap-2">
-            <label className="min-w-0 flex-1">
-              <span className="sr-only">Hostname</span>
-              <TextInput
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                placeholder="app.example.com"
-                required
-                className="font-mono"
-              />
-            </label>
-            {services.length > 1 && (
-              <label className="w-32 shrink-0">
-                <span className="sr-only">Service</span>
-                <Select value={service || services[0].name} onChange={(e) => setService(e.target.value)}>
-                  {services.map((s) => (
-                    <option key={s.name}>{s.name}</option>
-                  ))}
-                </Select>
-              </label>
-            )}
-            <Button type="submit" busy={busy}>
-              Add
-            </Button>
-          </div>
-          <ErrorNote error={error} />
-          <span className="text-meta text-ink-2" aria-live="polite">
-            {added ? (
-              <>
-                Point the A record of <span className="font-mono text-ink">{added}</span> at this server. HTTPS follows
-                once DNS resolves.
-              </>
-            ) : (
-              'Needs an A record pointing at this server.'
-            )}
-          </span>
-        </form>
+    <>
+      <form onSubmit={submit} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto] sm:items-end">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="domain-host">Hostname</Label>
+          <Input id="domain-host" value={host} onChange={(e) => setHost(e.target.value)} placeholder={`app.${detail.name}.com`} required className="font-mono" />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="domain-service">Service</Label>
+          <Select value={service || services[0].name} onValueChange={setService}>
+            <SelectTrigger id="domain-service">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {services.map((s) => (
+                <SelectItem key={s.name} value={s.name}>
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button type="submit" busy={busy} variant="outline" className="h-9">
+          Add domain
+        </Button>
+      </form>
+      <ErrorNote error={error} />
+      {added && (
+        <p className="text-body text-muted-foreground" aria-live="polite">
+          Point the A record of <span className="font-mono text-foreground">{added}</span> at this server.
+        </p>
       )}
-      {detail.domains.length > 0 && (
-        <ul>
-          {detail.domains.map((d) => (
-            <li key={d.hostname} className="flex min-h-11 items-center gap-2 border-b border-rule pr-3 pl-4 last:border-b-0">
-              <a
-                href={`https://${d.hostname}`}
-                target="_blank"
-                rel="noreferrer"
-                className="min-w-0 flex-1 truncate font-mono text-meta text-ink underline decoration-rule hover:decoration-ink"
-              >
-                {d.hostname}
-              </a>
-              <span className="text-meta text-ink-2">{d.service}</span>
-              <ArmGo
-                small
-                label="Remove"
-                go="Go: remove"
-                onGo={() => void api.removeDomain(detail.name, d.hostname).then(onChanged, setError)}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-    </Pane>
+      <Rows>
+        {services.flatMap((s) =>
+          s.urls
+            .filter((u) => u.endsWith('.sslip.io'))
+            .map((u) => (
+              <li key={u} className={row}>
+                <a href={u} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-body hover:underline">
+                  {u.replace(/^https:\/\//, '')}
+                </a>
+                <span className="text-small text-muted-foreground">{s.name} · built in</span>
+              </li>
+            )),
+        )}
+        {detail.domains.map((d) => (
+          <li key={d.hostname} className={row}>
+            <a href={`https://${d.hostname}`} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-mono text-body hover:underline">
+              {d.hostname}
+            </a>
+            <span className="text-small text-muted-foreground">{d.service}</span>
+            <ArmButton variant="ghost" size="sm" label="Remove" go={`Go: remove`} onGo={() => void api.removeDomain(detail.name, d.hostname).then(onChanged, setError)} />
+          </li>
+        ))}
+      </Rows>
+    </>
   );
-}
-
-/** "20261017T154007Z-before-r3.dump" → "before r3". */
-// A backup is named <time>-<reason>.<kind>: dump (Postgres), rdb (Redis) or vol-<name>.tar.
-function backupLabel(b: Backup) {
-  const m = /Z-([a-z0-9-]+)\.(dump|rdb|vol-[a-z0-9-]+\.tar)$/.exec(b.name);
-  if (!m) return '';
-  const what = m[2] === 'dump' ? 'postgres' : m[2] === 'rdb' ? 'redis' : m[2].slice(4, -4);
-  return `${what} · ${m[1].replace('-', ' ')}`;
 }
 
 function Backups({ name }: { name: string }) {
@@ -355,13 +370,12 @@ function Backups({ name }: { name: string }) {
   }, [load]);
 
   return (
-    <Pane
-      id="backups"
-      title={list && list.length > 0 ? `Backups · ${list.length}` : 'Backups'}
-      className="lg:flex-1"
-      action={
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-body text-muted-foreground">{list ? `${list.length} on this server` : 'Loading…'}</p>
         <Button
-          small
+          variant="outline"
+          size="sm"
           busy={busy}
           onClick={async () => {
             setBusy(true);
@@ -378,38 +392,33 @@ function Backups({ name }: { name: string }) {
         >
           Back up now
         </Button>
-      }
-    >
-      {error ? (
-        <div className="px-4 py-3">
-          <ErrorNote error={error} />
-        </div>
+      </div>
+      <ErrorNote error={error} />
+      {list === null ? (
+        <Skeleton className="h-24 rounded-card" />
+      ) : list.length > 0 ? (
+        <Rows>
+          {list.map((b) => {
+            const label = backupLabel(b.name);
+            return (
+              <li key={b.name} className={row}>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate">{label ? `${label.what}, ${label.why}` : b.name}</span>
+                  <span className="text-small text-muted-foreground">
+                    <When at={b.created_at} />
+                  </span>
+                </span>
+                <span className="tabular text-right text-small text-muted-foreground">{formatBytes(b.size)}</span>
+                <Button variant="ghost" size="icon" asChild className="size-7 text-muted-foreground hover:text-foreground">
+                  <a href={api.backupURL(name, b.name)} download aria-label={`Download backup from ${new Date(b.created_at).toLocaleString()}`} title="Download">
+                    <Download />
+                  </a>
+                </Button>
+              </li>
+            );
+          })}
+        </Rows>
       ) : null}
-      {list && list.length === 0 && (
-        <p className="px-4 py-3 text-meta text-ink-2">Kayly backs up Postgres, Redis and volumes daily, and Postgres before every release step.</p>
-      )}
-      {list && list.length > 0 && (
-        <ul>
-          {list.map((b) => (
-            <li key={b.name} className="flex min-h-11 items-center gap-3 border-b border-rule pr-3 pl-4 last:border-b-0">
-              <span className="min-w-0 flex-1">
-                <When at={b.created_at} />
-              </span>
-              <span className="font-mono text-meta text-ink-2">{backupLabel(b)}</span>
-              <span className="w-16 text-right text-meta text-ink-2 tabular-nums">{formatBytes(b.size)}</span>
-              <a
-                href={api.backupURL(name, b.name)}
-                download
-                aria-label={`Download backup from ${new Date(b.created_at).toLocaleString()}`}
-                title="Download"
-                className="inline-flex size-8 items-center justify-center rounded-[3px] text-ink-2 hover:bg-hover hover:text-ink"
-              >
-                <Download size={16} />
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Pane>
+    </>
   );
 }

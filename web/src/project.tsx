@@ -1,11 +1,16 @@
-import { ExternalLink } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
-import { type Navigate, projectPath } from './App';
-import { ApiError, api, type ProjectDetail, type Release, type ReleaseStatus, type StreamResult } from './api';
-import { Logs } from './logs';
-import { Overview } from './overview';
-import { Settings } from './settings';
-import { ArmGo, ErrorNote, Kbd, Lamp, When } from './ui';
+import { type MouseEvent, useCallback, useEffect, useState } from 'react';
+import { type Navigate, projectPath } from '@/App';
+import { ApiError, api, type ProjectDetail, type Release, type StreamResult } from '@/api';
+import { ArmButton } from '@/components/arm-button';
+import { ErrorNote, Kbd, When } from '@/components/common';
+import { StatusBadge } from '@/components/status';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { shortCommit } from '@/lib/format';
+import { cn } from '@/lib/utils';
+import { Logs } from '@/logs';
+import { Overview, ReleaseSheet } from '@/overview';
+import { Settings } from '@/settings';
 
 export type Tab = 'overview' | 'logs' | 'settings';
 
@@ -15,13 +20,9 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'settings', label: 'Settings' },
 ];
 
-export type Operation = {
-  title: string;
-  log: string;
-  result?: StreamResult;
-};
+export type Operation = { title: string; log: string; result?: StreamResult };
 
-/** Hook: the project's detail, refreshed every few seconds while the tab is visible. */
+/** The project's detail, refreshed every few seconds while the tab is visible. */
 function useProject(name: string) {
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -55,15 +56,15 @@ export function ProjectPage({
   const { detail, error, reload } = useProject(name);
   const [op, setOp] = useState<Operation | null>(null);
   const [landed, setLanded] = useState<number | null>(null);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [opened, setOpened] = useState<number | null>(null);
   // Env values and add-ons reach running services only through a new release.
   const [pending, setPending] = useState(false);
 
-  // 1, 2 and 3 switch tabs when the keyboard is not busy with a field.
+  // 1, 2 and 3 switch tabs when the keyboard is not busy with a field or a dialog.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (e.metaKey || e.ctrlKey || e.altKey || t.closest('input, textarea, select, dialog')) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || t.closest('input, textarea, select, [role=dialog]')) return;
       const next = tabs[Number(e.key) - 1];
       if (next) navigate(projectPath(name, next.id));
     };
@@ -74,6 +75,7 @@ export function ProjectPage({
   const run = useCallback(
     async (title: string, start: (onLog: (t: string) => void) => Promise<StreamResult>, rollbackTo?: number) => {
       setOp({ title, log: '' });
+      setOpened(null);
       navigate(projectPath(name));
       const before = Math.max(0, ...(detail?.releases.map((r) => r.seq) ?? []));
       let result: StreamResult;
@@ -97,7 +99,6 @@ export function ProjectPage({
       setOp((o) => (o ? { ...o, result } : o));
       if (result.ok) {
         setLanded(result.release ?? null);
-        setSelected(result.release ?? null);
         setPending(false);
       }
       await reload();
@@ -108,125 +109,150 @@ export function ProjectPage({
 
   if (error && !detail) {
     return (
-      <main className="flex flex-col gap-3 p-5">
+      <div className="flex flex-col items-start gap-3 p-6">
         <ErrorNote error={error} />
-        <a
-          href="/"
-          onClick={(e) => {
-            e.preventDefault();
-            navigate('/');
-          }}
-          className="text-select-ink underline"
-        >
+        <Button variant="outline" onClick={() => navigate('/')}>
           All projects
-        </a>
-      </main>
+        </Button>
+      </div>
     );
   }
   if (!detail) return <PageSkeleton />;
 
   const live = detail.releases.find((r) => r.status === 'live');
-  const shown = detail.releases.find((r) => r.seq === selected) ?? live ?? detail.releases[0];
-  const changed = () => {
-    setPending(Boolean(live));
-    void reload();
-  };
+  const newest = detail.releases[0];
+  const failedAfterLive = newest?.status === 'failed' && (!live || newest.seq > live.seq) ? newest : undefined;
   const busy = Boolean(op && !op.result);
+  const redeploy = () => void run('Redeploy', (onLog) => api.redeploy(name, onLog));
+  const tabClick = (t: Tab) => (e: MouseEvent) => {
+    e.preventDefault();
+    navigate(projectPath(name, t));
+  };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <section aria-label="Live release" className="shrink-0 border-b border-display-rule bg-display px-3 pt-3 text-display-ink sm:px-5 sm:pt-4">
-        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1.5">
-            <h1 className="text-title font-bold tracking-tight">{name}</h1>
-            {live ? (
-              <p className="flex items-center gap-2.5">
-                <Lamp state="live" size={16} land={landed === live.seq} />
-                <span className="font-mono text-cue font-semibold tracking-tight">r{live.seq}</span>
-                <span className="text-meta text-display-ink-2">
-                  live since <When at={live.created_at} />
-                </span>
-              </p>
-            ) : (
-              <p className="flex items-center gap-2 text-display-ink-2">
-                <Lamp state="off" />
-                Not deployed yet
-              </p>
-            )}
-            <ServiceLinks detail={detail} />
+    <div className="flex min-h-full flex-col">
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 px-4 pt-5 sm:px-6 sm:pt-6">
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex items-center gap-3">
+            <h1 className="truncate text-title font-semibold">{name}</h1>
+            <ProjectState detail={detail} live={live} />
           </div>
-          {live && (
-            <div className="flex items-center gap-3 max-sm:w-full max-sm:flex-col max-sm:items-stretch">
-              {pending && <span className="text-meta text-display-ink-2">New values apply on redeploy</span>}
-              <ArmGo
-                label="Redeploy"
-                go={`Go: r${live.seq}'s image again`}
-                variant={pending ? 'go' : 'display'}
-                busy={busy}
-                onGo={() => void run('Redeploy', (onLog) => api.redeploy(name, onLog))}
-              />
-            </div>
-          )}
+          <Finding live={live} failed={failedAfterLive} pending={pending} newest={newest} />
         </div>
-
-        {detail.releases.length > 0 && (
-          <StepRow
-            releases={detail.releases}
-            selected={shown?.seq}
-            landed={landed}
-            onSelect={(seq) => {
-              setSelected(seq);
-              navigate(projectPath(name));
-            }}
-          />
+        {live && (
+          <div className="flex items-center gap-2 max-sm:w-full">
+            {failedAfterLive && (
+              <Button onClick={() => setOpened(failedAfterLive.seq)} className="max-sm:flex-1">
+                Why r{failedAfterLive.seq} failed
+              </Button>
+            )}
+            <ArmButton
+              label="Redeploy"
+              go={`Go: r${live.seq}'s image again`}
+              variant={failedAfterLive ? 'outline' : 'default'}
+              busy={busy}
+              onGo={redeploy}
+              className="max-sm:flex-1"
+            />
+          </div>
         )}
+      </div>
 
-        <nav aria-label="Project" className="-mx-1 mt-2 flex gap-1">
-          {tabs.map((t, i) => (
-            <a
-              key={t.id}
-              href={projectPath(name, t.id)}
-              aria-current={t.id === tab ? 'page' : undefined}
-              onClick={(e) => {
-                e.preventDefault();
-                navigate(projectPath(name, t.id));
-              }}
-              className={`group flex h-10 items-center gap-2 border-b-2 px-2 text-body font-semibold no-underline transition-colors duration-150 ${
-                t.id === tab
-                  ? 'border-select text-display-ink'
-                  : 'border-transparent text-display-ink-2 hover:text-display-ink'
-              }`}
-            >
-              {t.label}
-              <Kbd className="text-display-ink-2 opacity-0 transition-opacity duration-150 group-hover:opacity-100 max-sm:hidden">
-                {i + 1}
-              </Kbd>
-            </a>
-          ))}
-        </nav>
-      </section>
+      <nav aria-label="Project" className="mt-4 flex gap-5 overflow-x-auto border-b px-4 sm:px-6">
+        {tabs.map((t, i) => (
+          <a
+            key={t.id}
+            href={projectPath(name, t.id)}
+            onClick={tabClick(t.id)}
+            aria-current={t.id === tab ? 'page' : undefined}
+            className={cn(
+              'group -mb-px flex h-10 items-center gap-2 border-b-2 text-body transition-colors duration-150',
+              t.id === tab ? 'border-foreground font-medium text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {t.label}
+            <Kbd className="h-4 px-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 max-sm:hidden">{i + 1}</Kbd>
+          </a>
+        ))}
+      </nav>
 
-      <main className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5 lg:overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
         {tab === 'overview' && (
           <Overview
             detail={detail}
-            shown={shown}
             op={op}
-            busy={busy}
-            onSelect={setSelected}
+            landed={landed}
+            onOpen={setOpened}
             onDismiss={() => setOp(null)}
-            onRollback={(seq) => void run(`Roll back to r${seq}`, (onLog) => api.rollback(name, seq, onLog), seq)}
+            onSettings={() => navigate(projectPath(name, 'settings'))}
           />
         )}
         {tab === 'logs' &&
           (live ? (
             <Logs name={name} services={detail.services.map((s) => s.name)} releaseSeq={live.seq} />
           ) : (
-            <p className="text-ink-2">Logs appear once a release is live.</p>
+            <p className="text-body text-muted-foreground">Logs appear once a release is live.</p>
           ))}
-        {tab === 'settings' && <Settings detail={detail} onChanged={changed} onDomainsChanged={() => void reload()} />}
-      </main>
+        {tab === 'settings' && (
+          <Settings
+            detail={detail}
+            onChanged={() => {
+              setPending(Boolean(live));
+              void reload();
+            }}
+            onDomainsChanged={() => void reload()}
+          />
+        )}
+      </div>
+
+      <ReleaseSheet
+        project={name}
+        release={detail.releases.find((r) => r.seq === opened)}
+        live={live}
+        busy={busy}
+        onClose={() => setOpened(null)}
+        onRollback={(seq) => void run(`Roll back to r${seq}`, (onLog) => api.rollback(name, seq, onLog), seq)}
+      />
     </div>
+  );
+}
+
+/** One word for the project: live, deploying, degraded (a service is down) or not deployed. */
+function ProjectState({ detail, live }: { detail: ProjectDetail; live?: Release }) {
+  const newest = detail.releases[0];
+  if (newest && ['building', 'releasing', 'starting'].includes(newest.status)) return <StatusBadge tone="warning">Deploying</StatusBadge>;
+  if (!live) return <StatusBadge tone="neutral">Not deployed</StatusBadge>;
+  if (detail.services.some((s) => s.state !== 'running')) return <StatusBadge tone="warning">Degraded</StatusBadge>;
+  return <StatusBadge tone="positive">Live</StatusBadge>;
+}
+
+/** The line under the title: the one fact that most needs attention. */
+function Finding({ live, failed, pending, newest }: { live?: Release; failed?: Release; pending: boolean; newest?: Release }) {
+  const text = 'text-body text-muted-foreground';
+  if (failed) {
+    return (
+      <p className={text}>
+        <span className="font-medium text-negative">r{failed.seq} failed</span> <When at={failed.created_at} />
+        {failed.error && <>: {failed.error.split('\n')[0].replaceAll('`', '')}</>}.{' '}
+        {live ? `r${live.seq} kept serving.` : 'Nothing was live.'}
+      </p>
+    );
+  }
+  if (newest && newest !== live && newest.status !== 'superseded' && newest.status !== 'failed') {
+    return <p className={text}>r{newest.seq} is deploying. The live release keeps serving until it is healthy.</p>;
+  }
+  if (!live) return <p className={text}>Nothing is live yet.</p>;
+  return (
+    <p className={text}>
+      <span className="font-mono text-foreground">r{live.seq}</span> live since <When at={live.created_at} />
+      {live.commit && (
+        <>
+          {' '}
+          · <span className="font-mono">{shortCommit(live.commit)}</span>
+        </>
+      )}
+      {pending && <span className="text-warning"> · new values apply on redeploy</span>}
+    </p>
   );
 }
 
@@ -256,128 +282,17 @@ async function outcome(name: string, before: number, rollbackTo?: number): Promi
   return { ok: false, unknown: true, error: 'Kayly did not answer in time. Check the releases list.' };
 }
 
-function ServiceLinks({ detail }: { detail: ProjectDetail }) {
-  const links = detail.services.filter((s) => s.urls.length > 0);
-  if (links.length === 0) return null;
-  return (
-    <ul className="flex min-w-0 flex-wrap gap-x-4 gap-y-1">
-      {links.map((s) => (
-        <li key={s.name} className="flex min-w-0 items-center gap-1.5 text-meta">
-          {links.length > 1 && <span className="text-display-ink-2">{s.name}</span>}
-          <a
-            href={s.urls[0]}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex min-w-0 items-center gap-1 font-mono text-display-ink underline decoration-display-rule hover:decoration-display-ink"
-          >
-            <span className="truncate">{s.urls[0].replace(/^https:\/\//, '')}</span>
-            <ExternalLink size={12} aria-hidden="true" className="shrink-0 text-display-ink-2" />
-          </a>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-export const statusWord: Record<ReleaseStatus, string> = {
-  live: 'Live',
-  superseded: 'Previous',
-  failed: 'Failed',
-  building: 'Building',
-  releasing: 'Release step',
-  starting: 'Starting',
-};
-
-/** The cell's mark: the same shape language as the lamps, drawn as a step. */
-function stepLook(r: Release) {
-  switch (r.status) {
-    case 'live':
-      return 'border-live bg-live';
-    case 'failed':
-      return 'border-fail bg-fail';
-    case 'superseded':
-      return r.can_roll_back ? 'border-display-ink-2' : 'border-display-ink-2/30';
-    default:
-      return 'border-busy light-blink';
-  }
-}
-
-// How many steps fit: the newest ones; older releases stay in the Overview list.
-const stepFit =
-  'max-sm:[&:nth-last-child(n+13)]:hidden max-lg:[&:nth-last-child(n+25)]:hidden max-xl:[&:nth-last-child(n+37)]:hidden';
-
-/**
- * The release sequence: one step per release, oldest to newest, the live one lit. Selecting a
- * step opens it in Overview. Arrow keys move along the row.
- */
-function StepRow({
-  releases,
-  selected,
-  landed,
-  onSelect,
-}: {
-  releases: Release[];
-  selected?: number;
-  landed: number | null;
-  onSelect: (seq: number) => void;
-}) {
-  const steps = [...releases].sort((a, b) => a.seq - b.seq).slice(-48);
-  return (
-    <ol
-      aria-label="Releases, oldest to newest"
-      className="mt-4 flex gap-1"
-      onKeyDown={(e) => {
-        const i = steps.findIndex((r) => r.seq === selected);
-        const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
-        const next = steps[i + d];
-        if (!d || !next) return;
-        e.preventDefault();
-        onSelect(next.seq);
-        (e.currentTarget.querySelector(`[data-seq="${next.seq}"]`) as HTMLElement | null)?.focus();
-      }}
-    >
-      {steps.map((r) => {
-        const isSelected = r.seq === selected;
-        return (
-          <li key={r.seq} className={`flex w-6 flex-col items-center gap-1 ${stepFit}`}>
-            <button
-              type="button"
-              data-seq={r.seq}
-              tabIndex={isSelected ? 0 : -1}
-              aria-current={isSelected || undefined}
-              aria-label={`r${r.seq}, ${statusWord[r.status]}`}
-              title={`r${r.seq} · ${statusWord[r.status]}`}
-              onClick={() => onSelect(r.seq)}
-              className={`relative size-6 rounded-[3px] border-2 transition-[outline-color] duration-150 hover:outline hover:outline-1 hover:outline-offset-2 hover:outline-display-ink-2 ${stepLook(r)} ${
-                isSelected ? 'outline outline-2 outline-offset-2 !outline-select' : ''
-              } ${r.status === 'live' && landed === r.seq ? 'light-land' : ''}`}
-            >
-              {r.status === 'failed' && (
-                <svg viewBox="0 0 20 20" aria-hidden="true" className="absolute inset-0 size-full">
-                  <path d="M5 15 15 5" stroke="var(--k-display)" strokeWidth="2.5" strokeLinecap="round" />
-                </svg>
-              )}
-            </button>
-            <span
-              aria-hidden="true"
-              className={`font-mono text-meta ${isSelected || r.status === 'live' ? 'text-display-ink' : 'text-display-ink-2'}`}
-            >
-              {r.seq}
-            </span>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
 function PageSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Loading project" className="flex min-h-0 flex-1 flex-col">
-      <div className="h-40 shrink-0 bg-display" />
-      <div className="grid flex-1 gap-5 p-5 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="rounded-md border border-rule bg-surface" />
-        <div className="rounded-md border border-rule bg-surface max-lg:hidden" />
+    <div aria-busy="true" aria-label="Loading project" className="flex flex-col gap-6 p-6">
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-72" />
+      </div>
+      <Skeleton className="h-40 w-full rounded-card" />
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Skeleton className="h-64 rounded-card lg:col-span-2" />
+        <Skeleton className="h-64 rounded-card" />
       </div>
     </div>
   );
