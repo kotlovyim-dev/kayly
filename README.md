@@ -10,11 +10,11 @@ Deploy web apps, APIs, workers and Telegram bots to a server you own, with one c
 
 - **You hear about trouble, and a lost server loses no data.** Failed deploys, failed backups, restart loops and a filling disk reach your Telegram or webhook. Postgres, Redis and volumes are backed up, encrypted, to your own S3 bucket and restored from it, and a weekly drill proves the restore works.
 
-> **Status: v0.3.** Deploys, rollbacks, crash recovery, env, domains, one-click Postgres and Redis, the CLI and the web UI work end to end, and Kayly runs its first two production apps. Backups (local and off-site, with restore and a weekly drill), notifications, per-release deploy logs, service status and resource limits are in. Projects can follow a git repository and deploy on a GitHub push, tokens have scopes, a project binding and an expiry, every change is audited, and an MCP server lets agents deploy within their scope. Next, on the way to 1.0: Telegram bots ([roadmap](ARCHITECTURE.md#12-milestones)).
+> **Status: on the way to 1.0.** Released up to v0.3.1: deploys, rollbacks, crash recovery, env, domains, one-click Postgres and Redis, backups (local and off-site, with restore and a weekly drill), alerts, git push deploys, scoped tokens with an audit log, and an MCP server; Kayly runs its first two production apps. On `main`, unreleased: Telegram bots and Mini Apps, signed releases with `kayly upgrade`, a rate limit on token guessing, end-to-end CI with crashes and an upgrade under load, the full [documentation](docs/README.md), and a rebuilt web UI. 1.0 follows once its exit criteria hold on real servers ([roadmap](ARCHITECTURE.md#12-milestones)).
 
 ## Install
 
-On a fresh Ubuntu or Debian server with ports 80 and 443 open:
+On a fresh Ubuntu 22.04+ or Debian 12+ server with ports 80 and 443 open:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/kotlovyim-dev/kayly/main/install.sh | sudo sh
@@ -83,6 +83,12 @@ On a new server after a loss: `kayly restore -endpoint … -recovery-key …` br
 
 Every service with a port is served at `https://<service>.<project>.<ip>.sslip.io` before you set up any DNS.
 
+Upgrade later with `sudo kayly upgrade`: it checks the release's signature, backs Kayly up and restarts the daemon while your apps keep serving.
+
+## Documentation
+
+[docs/](docs/README.md) has the guides (install, deploy, domains, backups, bots, troubleshooting, security model) and the references for `kayly.toml`, the CLI, the HTTP API and MCP.
+
 ## How it works
 
 [ARCHITECTURE.md](ARCHITECTURE.md) describes the invariants, the deploy pipeline, crash recovery and the code layout. [RESEARCH.md](RESEARCH.md) explains why Kayly exists next to Vercel, Railway, Coolify and others.
@@ -92,6 +98,8 @@ Every service with a port is served at `https://<service>.<project>.<ip>.sslip.i
 ```sh
 go test -race ./...                                   # unit tests, including the pipeline against a fake runtime
 KAYLY_DOCKER_TESTS=1 go test ./internal/docker ./internal/build   # against a real Docker daemon
+sudo bash test/e2e/e2e.sh ./kayly                     # a whole server, on a disposable host (CI runs it)
+cd web && npm test && npm run dev:mock                # the UI's tests, and the UI on sample data
 ```
 
 ## License
