@@ -445,7 +445,7 @@ func (s *Server) projectDetail(ctx context.Context, p store.Project) (ProjectDet
 	if err != nil {
 		return d, err
 	}
-	d.EnvKeys = slices.Sorted(maps.Keys(env))
+	d.EnvKeys = append([]string{}, slices.Sorted(maps.Keys(env))...)
 	d.MissingEnv = []string{}
 	if live != nil {
 		for _, key := range slices.Sorted(maps.Keys(live.Env)) {

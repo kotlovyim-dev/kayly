@@ -206,6 +206,20 @@ func TestProjectsEnvDomains(t *testing.T) {
 	check("DELETE", "/api/v1/projects/leryo/domains/leryo.example.com", "", 404)
 }
 
+func TestEmptyProjectDetailHasNoNullLists(t *testing.T) {
+	e := newEnv(t)
+	if code, out := e.do(e.trusted, "POST", "/api/v1/projects", `{"name":"new"}`, ""); code != 201 {
+		t.Fatalf("create = %d: %s", code, out)
+	}
+	code, out := e.do(e.trusted, "GET", "/api/v1/projects/new", "", "")
+	if code != 200 {
+		t.Fatalf("detail = %d: %s", code, out)
+	}
+	if strings.Contains(out, "null") {
+		t.Errorf("an empty project's detail carries null where the UI expects a list: %s", out)
+	}
+}
+
 func TestDeployRejectsBadArchive(t *testing.T) {
 	e := newEnv(t)
 	e.do(e.trusted, "POST", "/api/v1/projects", `{"name":"app"}`, "")
