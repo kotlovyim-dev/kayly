@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/kotlovyim-dev/kayly/internal/secret"
@@ -57,6 +59,21 @@ func Open(ctx context.Context, path string, box *secret.Box) (*Store, error) {
 
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
+
+// SetAside moves the closed database at path, with its write-ahead log, into dir (created if
+// needed), so that another database can take its place.
+func SetAside(path, dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("set aside %s: %w", path, err)
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		err := os.Rename(path+suffix, filepath.Join(dir, filepath.Base(path)+suffix))
+		if err != nil && (suffix == "" || !errors.Is(err, os.ErrNotExist)) {
+			return fmt.Errorf("set aside %s: %w", path+suffix, err)
+		}
+	}
+	return nil
+}
 
 // migrations are applied in order; PRAGMA user_version records how many ran.
 // Never edit a migration that has been released: append a new one.

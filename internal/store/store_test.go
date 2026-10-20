@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -38,6 +39,33 @@ func TestReopenKeepsData(t *testing.T) {
 	defer s2.Close()
 	if _, err := s2.Project(ctx, "leryo"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSetAsideMovesTheDatabaseAndItsLog(t *testing.T) {
+	s, path := open(t)
+	if _, err := s.CreateProject(context.Background(), "leryo"); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	dir := filepath.Join(filepath.Dir(path), "aside")
+	if err := SetAside(path, dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the database is still in place: %v", err)
+	}
+	box, _ := secret.NewBox(bytes.Repeat([]byte{7}, 32))
+	moved, err := Open(context.Background(), filepath.Join(dir, "kayly.db"), box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer moved.Close()
+	if ps, err := moved.Projects(context.Background()); err != nil || len(ps) != 1 {
+		t.Fatalf("projects in the moved database = %v, %v", ps, err)
+	}
+	if err := SetAside(filepath.Join(dir, "missing.db"), dir); err == nil {
+		t.Fatal("set aside a database that does not exist")
 	}
 }
 
