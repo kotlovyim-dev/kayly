@@ -9,3 +9,8 @@ node_modules/
 /.impeccable/questions/
 /.playwright-mcp/
 /.taste-skill/
+# Locally installed agent skills (npx skills add) and their lock file
+/.agents/
+/.claude/skills/
+/.claude/settings.local.json
+/skills-lock.json
