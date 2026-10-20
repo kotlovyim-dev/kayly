@@ -29,7 +29,25 @@ jobs:
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o dist/kayly-linux-$arch ./cmd/kayly
           done
           (cd dist && sha256sum kayly-linux-* > checksums.txt)
+      - name: Sign
+        # install.sh and `kayly upgrade` install a binary only when checksums.txt carries a valid
+        # signature by this key; its public half is internal/upgrade/release.pub.
+        env:
+          KAYLY_SIGNING_KEY: ${{ secrets.KAYLY_SIGNING_KEY }}
+        run: |
+          [ -n "$KAYLY_SIGNING_KEY" ] || { echo "::error::the KAYLY_SIGNING_KEY secret is not set"; exit 1; }
+          umask 077
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$KAYLY_SIGNING_KEY" >"$key"
+          openssl pkeyutl -sign -inkey "$key" -rawin -in dist/checksums.txt -out dist/checksums.txt.sig
+          openssl pkeyutl -verify -pubin -inkey internal/upgrade/release.pub -rawin -in dist/checksums.txt -sigfile dist/checksums.txt.sig
+      - name: Release notes
+        # The tag's section of CHANGELOG.md.
+        run: |
+          awk -v v="${GITHUB_REF_NAME#v}" '/^## /{p = index($0, "[" v "]") > 0; next} p' CHANGELOG.md >notes.md
+          [ -s notes.md ] || { echo "::error::CHANGELOG.md has no section [${GITHUB_REF_NAME#v}]"; exit 1; }
       - name: Publish
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/* --notes-file notes.md
         env:
           GH_TOKEN: ${{ github.token }}

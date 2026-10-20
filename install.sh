@@ -4,14 +4,22 @@
 #
 # Environment (all optional):
 #   KAYLY_VERSION   release to install (default: latest)
-#   KAYLY_BINARY    path to a kayly binary to install instead of downloading one
-#   KAYLY_DOMAIN    hostname for the Kayly API (default: kayly.<ip>.sslip.io)
+#   KAYLY_BINARY    path to a kayly binary to install instead of downloading one (not checked)
+#   KAYLY_BASE_DOMAIN  services get <service>.<project>.<base> (default: <ip>.sslip.io;
+#                   "localhost" serves everything with Caddy's local certificates, for tests)
+#   KAYLY_DOMAIN    hostname for the Kayly API (default: kayly.<base domain>)
 #   KAYLY_EMAIL     contact email for Let's Encrypt
 set -eu
 
 REPO=kotlovyim-dev/kayly
 # Pinned like everything Kayly runs, hashes included. Bump together with cmd/kayly/serve.go.
 RAILPACK_VERSION=0.40.1
+
+# Releases are signed: checksums.txt.sig is an ed25519 signature of checksums.txt by this key,
+# the same one internal/upgrade/release.pub holds for `kayly upgrade`.
+RELEASE_KEY='-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAp3Z5Wl4WjjWbQMePFkM5B6KqUq9f3zgCf3PK1tZ4VKQ=
+-----END PUBLIC KEY-----'
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -69,14 +77,25 @@ else
   [ -n "$version" ] || die "could not find the latest Kayly release"
   say "Installing kayly $version"
   url="https://github.com/$REPO/releases/download/$version"
-  sum=$(curl -fsSL "$url/checksums.txt" | awk -v f="kayly-linux-$ARCH" '$2 == f { print $1 }')
+  command -v openssl >/dev/null || { apt-get update -qq && apt-get install -y -qq openssl; }
+  curl -fsSL "$url/checksums.txt" -o "$TMP/checksums.txt"
+  curl -fsSL "$url/checksums.txt.sig" -o "$TMP/checksums.txt.sig" || die "release $version is not signed"
+  printf '%s\n' "$RELEASE_KEY" >"$TMP/release.pub"
+  # -rawin (OpenSSL 3, in Ubuntu 22.04+ and Debian 12+) verifies a plain ed25519 signature.
+  openssl pkeyutl -verify -pubin -inkey "$TMP/release.pub" -rawin -in "$TMP/checksums.txt" -sigfile "$TMP/checksums.txt.sig" >/dev/null 2>&1 ||
+    die "the signature of release $version does not verify; not installing it"
+  sum=$(awk -v f="kayly-linux-$ARCH" '$2 == f { print $1 }' "$TMP/checksums.txt")
   [ -n "$sum" ] || die "no checksum for kayly-linux-$ARCH"
   fetch "$url/kayly-linux-$ARCH" "$TMP/kayly" "$sum"
   install -m 755 "$TMP/kayly" /usr/local/bin/kayly
 fi
 
-ip=$(curl -fsS4 https://api.ipify.org) || die "could not detect the public IPv4 address"
-base="$(echo "$ip" | tr . -).sslip.io"
+if [ -n "${KAYLY_BASE_DOMAIN:-}" ]; then
+  base=$KAYLY_BASE_DOMAIN
+else
+  ip=$(curl -fsS4 https://api.ipify.org) || die "could not detect the public IPv4 address"
+  base="$(echo "$ip" | tr . -).sslip.io"
+fi
 domain=${KAYLY_DOMAIN:-kayly.$base}
 
 say "Starting the kayly service"

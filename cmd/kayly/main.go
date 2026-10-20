@@ -35,6 +35,8 @@ On the server:
                                             create an API token for a laptop, CI or an agent
   kayly token ls | token rm <id>
   kayly audit [-n lines]                    who changed what
+  kayly upgrade [version] [-binary path]    install a signed release (default: the latest) after a
+                                            Kayly backup; apps and the proxy keep serving
 
 Anywhere:
   kayly login <url> <token>                 remember a server
@@ -59,7 +61,7 @@ Anywhere:
   kayly backups setup <endpoint> <bucket> <access-key> [region]   off-site S3; the secret key comes on stdin
   kayly backups status | sync | drill | kayly   kayly: snapshot Kayly's own database and key
   kayly restore -endpoint E -bucket B -access-key K -recovery-key KEY [-region R]
-                                            on a new server, before starting the daemon: brings back
+                                            on a new server, right after install.sh: brings back
                                             the database, key and newest backups; the secret key comes on stdin
   kayly notify ls | telegram <chat-id> | webhook <url> | off telegram|webhook | test
                                             telegram reads the bot token from stdin
@@ -85,6 +87,8 @@ func main() {
 		err = login(args)
 	case "restore":
 		err = restoreServer(args)
+	case "upgrade":
+		err = upgradeServer(args)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
