@@ -259,6 +259,59 @@ func TestSessionAndUI(t *testing.T) {
 	}
 }
 
+func TestUnknownTokensAreRateLimitedPerAddress(t *testing.T) {
+	e := newEnv(t)
+	_, body := e.do(e.trusted, "POST", "/api/v1/tokens", `{"name":"laptop"}`, "")
+	var tok TokenView
+	json.Unmarshal([]byte(body), &tok)
+
+	from := func(addr, method, path, body, token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("X-Forwarded-For", addr)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		e.public.ServeHTTP(rec, req)
+		return rec
+	}
+	// Sign-in and bearer tokens draw on the same allowance.
+	for i := range guessBurst {
+		var rec *httptest.ResponseRecorder
+		if i%2 == 0 {
+			rec = from("203.0.113.9", "POST", "/api/v1/session", `{"token":"kayly_guess"}`, "")
+		} else {
+			rec = from("203.0.113.9", "GET", "/api/v1/projects", "", "kayly_guess")
+		}
+		if rec.Code != 401 {
+			t.Fatalf("guess %d: %d, want 401", i+1, rec.Code)
+		}
+	}
+	for _, rec := range []*httptest.ResponseRecorder{
+		from("203.0.113.9", "POST", "/api/v1/session", `{"token":"kayly_guess"}`, ""),
+		from("203.0.113.9", "GET", "/mcp", "", "kayly_guess"),
+		// Even a valid token waits: a guesser must not learn which of its guesses was right.
+		from("203.0.113.9", "GET", "/api/v1/projects", "", tok.Token),
+	} {
+		if rec.Code != 429 || rec.Header().Get("Retry-After") == "" || !strings.Contains(rec.Body.String(), "rate_limited") {
+			t.Fatalf("after the burst: %d %q %s", rec.Code, rec.Header().Get("Retry-After"), rec.Body)
+		}
+	}
+	// Another address, and the proxy's last X-Forwarded-For entry is the one that counts.
+	if rec := from("198.51.100.4, 203.0.113.9", "GET", "/api/v1/projects", "", tok.Token); rec.Code != 429 {
+		t.Fatalf("spoofed first entry: %d, want 429", rec.Code)
+	}
+	if rec := from("198.51.100.4", "GET", "/api/v1/projects", "", tok.Token); rec.Code != 200 {
+		t.Fatalf("another address: %d, want 200", rec.Code)
+	}
+	// Requests without any token are not guesses.
+	for range guessBurst + 1 {
+		if rec := from("192.0.2.77", "GET", "/api/v1/projects", "", ""); rec.Code != 401 {
+			t.Fatalf("no token: %d, want 401", rec.Code)
+		}
+	}
+}
+
 func TestNotificationsNeverEchoSecrets(t *testing.T) {
 	e := newEnv(t)
 	put := func(body string) (int, string) { return e.do(e.trusted, "PUT", "/api/v1/notifications", body, "") }

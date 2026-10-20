@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,6 +32,7 @@ import (
 	"github.com/kotlovyim-dev/kayly/internal/gitsrc"
 	"github.com/kotlovyim-dev/kayly/internal/notify"
 	"github.com/kotlovyim-dev/kayly/internal/offsite"
+	"github.com/kotlovyim-dev/kayly/internal/ratelimit"
 	"github.com/kotlovyim-dev/kayly/internal/store"
 )
 
@@ -53,11 +55,19 @@ type Server struct {
 	Offsite *offsite.Manager
 	// Version is Kayly's own version, shown by the server status.
 	Version string
+	// guesses slows down an address that keeps presenting tokens that do not exist.
+	guesses *ratelimit.Limiter
 }
+
+// A client address may present this many unknown tokens in a row, then one a minute.
+const (
+	guessBurst = 10
+	guessEvery = time.Minute
+)
 
 // New returns a Server. workDir must exist.
 func New(st *store.Store, d *deploy.Deployer, workDir string, log *slog.Logger) *Server {
-	return &Server{store: st, deployer: d, workDir: workDir, log: log}
+	return &Server{store: st, deployer: d, workDir: workDir, log: log, guesses: ratelimit.New(guessBurst, guessEvery)}
 }
 
 // Handler returns the API. A trusted handler (the root-only admin socket) needs no token
@@ -206,10 +216,14 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 		}
 		var t store.Token
 		if ok {
+			if s.tooManyGuesses(w, r) {
+				return
+			}
 			var err error
 			t, err = s.store.LookupToken(r.Context(), tok)
 			if errors.Is(err, store.ErrNotFound) {
 				ok = false
+				s.guesses.Fail(clientAddr(r))
 			} else if err != nil {
 				s.fail(w, r, err)
 				return
@@ -229,7 +243,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Token string `json:"token"`
 	}
-	if !readJSON(w, r, &body) {
+	if !readJSON(w, r, &body) || s.tooManyGuesses(w, r) {
 		return
 	}
 	_, err := s.store.LookupToken(r.Context(), strings.TrimSpace(body.Token))
@@ -238,6 +252,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		s.guesses.Fail(clientAddr(r))
 		writeError(w, http.StatusUnauthorized, "unauthorized", "this token is not valid",
 			"create one on the server with `kayly token create <name>`")
 		return
@@ -247,6 +262,35 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		MaxAge: 30 * 24 * 3600, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// tooManyGuesses answers 429 and reports true when the request's address has presented too many
+// unknown tokens lately. Tokens are long random strings; this keeps guessing from being free and
+// keeps the log quiet.
+func (s *Server) tooManyGuesses(w http.ResponseWriter, r *http.Request) bool {
+	wait := s.guesses.Wait(clientAddr(r))
+	if wait == 0 {
+		return false
+	}
+	secs := int(wait.Round(time.Second) / time.Second)
+	w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
+	writeError(w, http.StatusTooManyRequests, "rate_limited", "too many invalid tokens from this address",
+		fmt.Sprintf("wait %d seconds, then try again with a valid token", max(secs, 1)))
+	return true
+}
+
+// clientAddr is the address a request came from. The public listener is reached only through
+// the proxy, which replaces X-Forwarded-For with the client's address; the last entry is the
+// one the proxy wrote.
+func clientAddr(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return strings.TrimSpace(xff[strings.LastIndexByte(xff, ',')+1:])
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
