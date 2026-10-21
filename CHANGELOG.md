@@ -2,7 +2,7 @@
 
 Every release of Kayly, newest first. The format follows [Keep a Changelog](https://keepachangelog.com); versions follow [semantic versioning](docs/compatibility.md) from 1.0. When a version is tagged, its section here becomes the release notes, so rename `Unreleased` to `[x.y.z] - date` in the commit that is tagged.
 
-## Unreleased
+## [0.6.0] - 2026-10-21
 
 ### Added
 - The CLI runs on Windows and macOS: releases carry signed `kayly-windows-*.exe` and `kayly-darwin-*` binaries next to the Linux ones.
