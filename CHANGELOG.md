@@ -2,6 +2,11 @@
 
 Every release of Kayly, newest first. The format follows [Keep a Changelog](https://keepachangelog.com); versions follow [semantic versioning](docs/compatibility.md) from 1.0. When a version is tagged, its section here becomes the release notes, so rename `Unreleased` to `[x.y.z] - date` in the commit that is tagged.
 
+## [0.6.2] - 2026-10-21
+
+### Changed
+- The `kayly` npm package ships its README, so its npm page carries the CLI's documentation and troubleshooting.
+
 ## [0.6.1] - 2026-10-21
 
 ### Fixed

@@ -77,5 +77,14 @@ jobs:
         run: |
           [ -n "$NODE_AUTH_TOKEN" ] || { echo "::error::the NPM_TOKEN secret is not set"; exit 1; }
           npm test
-          npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version
+          version="${GITHUB_REF_NAME#v}"
+          # The package's version must be the release's: the launcher downloads that release's
+          # binary, so a version published without one fails on first run. The version comes from
+          # the tag, never from a hand-edited npm/package.json; if it is already on npm (say, a
+          # release was re-tagged), there is nothing left to publish.
+          if npm view "kayly@$version" version >/dev/null 2>&1; then
+            echo "::notice::kayly@$version is already published; skipping npm publish"
+            exit 0
+          fi
+          npm version "$version" --no-git-tag-version
           npm publish --provenance --access public
