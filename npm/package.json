@@ -1,6 +1,6 @@
 {
   "name": "kayly",
-  "version": "0.0.0",
+  "version": "0.6.2",
   "description": "The Kayly CLI: deploy web apps, APIs, workers and Telegram bots to a server you own.",
   "license": "AGPL-3.0-only",
   "homepage": "https://github.com/kotlovyim-dev/kayly",
