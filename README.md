@@ -46,9 +46,10 @@ curl -fsSL https://raw.githubusercontent.com/kotlovyim-dev/kayly/main/install.sh
 
 The installer brings Docker (if missing) and Railpack, installs Kayly only after checking the release's signature, starts the `kayly` systemd service and prints a login command.
 
-**2. Sign in** with the same binary from [Releases](https://github.com/kotlovyim-dev/kayly/releases), using the command the installer printed:
+**2. Sign in** from your laptop (Linux, macOS or Windows) with the command the installer printed. The CLI comes from npm (or as a binary from [Releases](https://github.com/kotlovyim-dev/kayly/releases)):
 
 ```sh
+npm install -g kayly           # or prefix each command with npx: npx kayly login …
 kayly login https://kayly.203-0-113-7.sslip.io kayly_…
 ```
 

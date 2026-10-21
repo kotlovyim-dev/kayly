@@ -25,6 +25,21 @@ jobs:
           install-go: false
       - name: Unit tests
         run: go test -race ./...
+      - name: Every release target builds
+        run: |
+          for t in linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS=${t%/*} GOARCH=${t#*/} go vet ./... || { echo "::error::go vet fails for $t"; exit 1; }
+          done
+
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm test
+        working-directory: npm
 
   docker:
     # Runtime and builder against a real Docker daemon, with the pinned Railpack.

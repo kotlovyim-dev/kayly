@@ -25,7 +25,7 @@ What Kayly protects, how, and what it does not.
 
 ## Releases of Kayly
 
-- `install.sh` and `kayly upgrade` install a Kayly binary only when `checksums.txt` carries a valid ed25519 signature by the release key and the binary matches its checksum. The public key is in the installer and in the binary (`internal/upgrade/release.pub`); the private key is a secret of the release workflow only.
+- `install.sh` and `kayly upgrade` install a Kayly binary only when `checksums.txt` carries a valid ed25519 signature by the release key and the binary matches its checksum. The public key is in the installer and in the binary (`internal/upgrade/release.pub`); the private key is a secret of the release workflow only. The `kayly` npm package carries no binary and applies the same check to the one it downloads.
 - Railpack, Caddy, Postgres and Redis images are pinned by version and digest.
 
 ## Reporting a vulnerability

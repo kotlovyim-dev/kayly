@@ -54,7 +54,7 @@ These hold across every code path, including crashes mid-deploy. Tests target th
 One Go binary, `kayly`, plays every role:
 
 - `kayly serve`: the daemon (systemd unit). HTTP API, embedded UI, MCP endpoint, deploy pipeline, reconciler, scheduler for backups.
-- `kayly <command>`: the CLI. Talks to the daemon's API over HTTPS with a token. Same binary on the server and on a laptop.
+- `kayly <command>`: the CLI. Talks to the daemon's API over HTTPS with a token. Same binary on the server and on a laptop; the daemon needs Linux, the CLI also runs on macOS and Windows. On a laptop it is installed from the release page or with `npm install -g kayly` / `npx kayly` (`npm/`): the npm package carries no binary, it downloads its own version's binary for the platform once and runs it only after the same signature and checksum check as `kayly upgrade`.
 
 Runtime dependencies on the host, all installed and pinned by `install.sh`:
 
@@ -241,7 +241,7 @@ One click (UI) or `kayly addons add <kind>` attaches an add-on to a project, lik
 - **Git source:** a project can follow a repo and branch over SSH (`kayly source set git@github.com:owner/repo.git`; HTTPS and submodules are not supported). Kayly generates an ed25519 deploy key (the public half is shown any time, to add to the repo read-only) and a webhook secret (shown once). A GitHub `push` webhook to `/api/v1/hooks/github/<project>` with a valid `X-Hub-Signature-256` fetches the pushed commit (shallow) and deploys it; pushes to other branches, deletions and pings are acknowledged and ignored, and the deploy runs on after the 202. A fetch that fails before a release exists sends a notification; later failures are alerted by the pipeline. The commit and its message are recorded on the release; `kayly source deploy [ref]` deploys a branch, tag or commit by hand. Host keys are trusted on first use (`known_hosts` in the data directory). `kayly deploy` from a working tree keeps working for any project.
 - **Notifications:** to a Telegram chat (a bot token and chat id) and/or a webhook URL (JSON POST). Events: deploy or rollback failed, a service restarting in a loop or failing its health check while live, a backup, upload or drill failed, disk above 85 %, a certificate that could not be issued, a Telegram call that failed. One message per event and state change, not per check: a restart loop is 3 restarts in 10 minutes, a failing health check is 3 failed probes in a row, and each ends with a short "all clear" message. Projects busy with a deploy, rollback or restore are not judged. (The certificate event waits for domain and certificate state, which §7 describes and Kayly does not track yet.)
 - **Upgrade:** `kayly upgrade [version]` downloads the release, checks its signature, takes a Kayly backup (§8), swaps the binary the unit runs (keeping the old one as `kayly.previous`) and restarts the unit. Apps and the proxy keep serving (invariant 4); schema migrations only move forward, so it refuses an older version, and downgrading means restoring that backup. `-binary <file>` installs a local build without the signature check, as `install.sh`'s `KAYLY_BINARY` does.
-- **Signed releases:** the release workflow signs `checksums.txt` with an ed25519 key held only as the `KAYLY_SIGNING_KEY` secret (`checksums.txt.sig`). Its public half is `internal/upgrade/release.pub`, embedded in the binary and copied into `install.sh` (a test keeps them equal); `install.sh` verifies with `openssl pkeyutl -rawin` (OpenSSL 3). Rotating the key means replacing both and releasing with the new secret.
+- **Signed releases:** the release workflow signs `checksums.txt` with an ed25519 key held only as the `KAYLY_SIGNING_KEY` secret (`checksums.txt.sig`). Its public half is `internal/upgrade/release.pub`, embedded in the binary and copied into `install.sh` (a test keeps them equal); `install.sh` verifies with `openssl pkeyutl -rawin` (OpenSSL 3), and the npm package (`npm/release.pub`, kept equal by its tests) with Node's `crypto`. Rotating the key means replacing all three and releasing with the new secret.
 
 ### MCP
 
@@ -284,6 +284,7 @@ internal/ratelimit/   per-address allowance for failed token checks
 internal/upgrade/     signed releases: fetch, verify (release.pub), install, version order
 internal/api/         HTTP handlers, auth, SSE, MCP
 web/                  UI (pnpm, Vite); `dist/` embedded
+npm/                  the `kayly` npm package: downloads, verifies and runs the release binary
 install.sh            host setup: docker, buildx, railpack, caddy container, systemd unit; checks the release signature
 test/e2e/             end-to-end test on a real Docker host: install, deploy, crash at each step, upgrade under load
 docs/                 user guides and the references for kayly.toml, CLI, API and MCP
@@ -297,7 +298,7 @@ Dependency direction: `api → deploy → {proxy, store, config, secret}`; `dock
 - Tests that must exist before v0.1: config parsing (every rule in section 5), proxy config generation (golden files), the pipeline against the fake runtime (each failing step leaves the active release untouched; crash at each step converges), env scoping (a key never reaches an unscoped service), and one end-to-end deploy of a fixture app in CI with real Docker.
 - Web: same tooling as leryo (Biome, `tsc`, Vitest).
 - Logs: `log/slog`, JSON in production, every line in a deploy carries `project` and `release`.
-- Conventional commits, a CHANGELOG, signed release binaries for linux/amd64 and linux/arm64 built in CI.
+- Conventional commits, a CHANGELOG, signed release binaries for linux, darwin and windows (amd64 and arm64) built in CI, and the npm package published after them.
 
 ## 12. Milestones
 

@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/kotlovyim-dev/kayly/internal/config"
@@ -188,16 +187,6 @@ func (d *Deployer) watchDisk(ctx context.Context) {
 		d.watch.disk = false
 		d.alert(ctx, "✓ the server's disk is down to %d%%", pct)
 	}
-}
-
-// statfsUsage is the used and total bytes of the filesystem holding path.
-func statfsUsage(path string) (used, total uint64, err error) {
-	var s syscall.Statfs_t
-	if err := syscall.Statfs(path, &s); err != nil {
-		return 0, 0, fmt.Errorf("statfs %s: %w", path, err)
-	}
-	total = s.Blocks * uint64(s.Bsize)
-	return total - s.Bfree*uint64(s.Bsize), total, nil
 }
 
 // HumanBytes writes a size the way people read it: 1.5 GiB.

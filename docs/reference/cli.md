@@ -1,6 +1,6 @@
 # CLI reference
 
-One binary, `kayly`, is both the daemon and its CLI. On the server the CLI talks to the daemon's root-only admin socket (`/run/kayly/admin.sock`, or `$KAYLY_RUN/admin.sock`) and needs no login. Anywhere else it uses the server and token saved by `kayly login`, or `KAYLY_URL` and `KAYLY_TOKEN` from the environment (for CI).
+One binary, `kayly`, is both the daemon and its CLI. The daemon runs on Linux; the CLI also runs on macOS and Windows, installed with `npm install -g kayly` (or run as `npx kayly …`) or from the releases page. On the server the CLI talks to the daemon's root-only admin socket (`/run/kayly/admin.sock`, or `$KAYLY_RUN/admin.sock`) and needs no login. Anywhere else it uses the server and token saved by `kayly login`, or `KAYLY_URL` and `KAYLY_TOKEN` from the environment (for CI).
 
 Commands that act on a project take `-p <project>`; without it, the project is the current directory's name. Flags may come before or after the arguments. Errors print the message and, when Kayly knows one, the next step.
 

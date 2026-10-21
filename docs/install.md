@@ -34,11 +34,14 @@ Options, as environment variables before `sh`:
 
 ## Sign in
 
-On your laptop, install the same binary (from the [releases page](https://github.com/kotlovyim-dev/kayly/releases)) and run the command the installer printed:
+On your laptop (Linux, macOS or Windows), install the CLI and run the command the installer printed:
 
 ```sh
+npm install -g kayly          # Node 20+; or run any command as `npx kayly …`
 kayly login https://kayly.203-0-113-7.sslip.io kayly_…
 ```
+
+The npm package holds no binary: on first run it downloads the `kayly` binary of its own version for your system from the release, checks its signature and checksum as `kayly upgrade` does, and keeps it in your cache directory. Without Node, take the binary for your system from the [releases page](https://github.com/kotlovyim-dev/kayly/releases) (`kayly-windows-amd64.exe`, `kayly-darwin-arm64`, …) and put it on your `PATH`.
 
 The web UI takes the same token. More tokens, with less power, for CI and agents:
 
