@@ -2,6 +2,11 @@
 
 Every release of Kayly, newest first. The format follows [Keep a Changelog](https://keepachangelog.com); versions follow [semantic versioning](docs/compatibility.md) from 1.0. When a version is tagged, its section here becomes the release notes, so rename `Unreleased` to `[x.y.z] - date` in the commit that is tagged.
 
+## Unreleased
+
+### Fixed
+- `kayly deploy` from Windows keeps executable files executable: Windows has no executable bit, so the CLI takes it from git (files git records as `100755`); other files are uploaded as `0644`.
+
 ## [0.6.0] - 2026-10-21
 
 ### Added

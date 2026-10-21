@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -725,9 +726,13 @@ func (c *client) deploy(ctx context.Context, name, dir string) error {
 	if err != nil {
 		return err
 	}
+	var executable map[string]bool
+	if runtime.GOOS == "windows" {
+		executable = gitExecutable(dir)
+	}
 	fmt.Printf("uploading %d files\n", len(files))
 	pr, pw := io.Pipe()
-	go func() { pw.CloseWithError(pack(dir, files, pw)) }()
+	go func() { pw.CloseWithError(pack(dir, files, executable, pw)) }()
 	return c.stream(ctx, "/api/v1/projects/"+name+"/deploys", "application/gzip", pr, commitHeaders(dir)...)
 }
 

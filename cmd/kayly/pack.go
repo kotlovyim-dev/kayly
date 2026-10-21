@@ -115,8 +115,28 @@ func (g gitignore) match(rel string, isDir bool) bool {
 	return false
 }
 
-// pack writes files from dir as a gzipped tar to w.
-func pack(dir string, files []string, w io.Writer) error {
+// gitExecutable is the set of files git's index records as executable (mode 100755) in dir.
+// Windows file systems have no executable bit, so a deploy from Windows takes it from git.
+// Outside a git work tree the set is empty.
+func gitExecutable(dir string) map[string]bool {
+	set := map[string]bool{}
+	out, err := exec.Command("git", "-C", dir, "ls-files", "--stage", "-z").Output()
+	if err != nil {
+		return set
+	}
+	for _, entry := range strings.Split(string(out), "\x00") {
+		// "<mode> <object> <stage>\t<path>"
+		meta, file, ok := strings.Cut(entry, "\t")
+		if ok && strings.HasPrefix(meta, "100755 ") {
+			set[file] = true
+		}
+	}
+	return set
+}
+
+// pack writes files from dir as a gzipped tar to w. Regular files keep their mode on the
+// file system, unless executable is set: then it alone decides between 0755 and 0644.
+func pack(dir string, files []string, executable map[string]bool, w io.Writer) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 	for _, f := range files {
@@ -139,6 +159,12 @@ func pack(dir string, files []string, w io.Writer) error {
 		}
 		h.Name = f
 		h.Uid, h.Gid, h.Uname, h.Gname = 0, 0, "", ""
+		if executable != nil && fi.Mode().IsRegular() {
+			h.Mode = 0o644
+			if executable[f] {
+				h.Mode = 0o755
+			}
+		}
 		if err := tw.WriteHeader(h); err != nil {
 			return err
 		}

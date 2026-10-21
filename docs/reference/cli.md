@@ -20,7 +20,7 @@ Commands that act on a project take `-p <project>`; without it, the project is t
 | Command | What it does |
 |---|---|
 | `kayly login <url> <token>` | Checks the token and saves the server for this user. |
-| `kayly deploy [dir]` | Uploads `dir` (default `.`, without what `.gitignore` excludes), creates the project on first use, and streams the deploy. Exits non-zero when the release fails. The current git commit and message are recorded. |
+| `kayly deploy [dir]` | Uploads `dir` (default `.`, without what `.gitignore` excludes), creates the project on first use, and streams the deploy. Exits non-zero when the release fails. The current git commit and message are recorded. From Windows, a file is executable in the build when git records it so (`git update-index --chmod=+x start.sh`). |
 | `kayly projects` | Projects with their live release. |
 | `kayly status` | The server's disk and memory; per service: state, restarts, CPU, memory. All projects, or `-p` one. |
 | `kayly releases` / `kayly releases log <release>` | Releases with status, commit and error; the full output of one deploy. |
