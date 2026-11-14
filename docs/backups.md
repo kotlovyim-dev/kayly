@@ -23,7 +23,7 @@ Add-ons outlive releases: no deploy, rollback or upgrade ever recreates them. Th
 |---|---|---|
 | Postgres | `pg_dump -Fc` | before every release step, daily, on demand |
 | Redis | a point-in-time RDB snapshot | daily, on demand |
-| Volumes | a `tar` of the volume | daily, on demand |
+| Volumes | a `tar` of the volume (unless `backup = false`, see [`[volumes.<name>]`](reference/kayly-toml.md#volumesname)) | daily, on demand |
 | Kayly itself | its database and master key | daily, before every upgrade, on demand (`kayly backups kayly`) |
 
 The last 14 of each kind stay in `/var/lib/kayly/backups/<project>` on the server: `kayly backups ls`, `kayly backups get <name>`, or download them from the UI.

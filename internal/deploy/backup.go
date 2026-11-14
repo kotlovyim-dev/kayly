@@ -47,7 +47,7 @@ type target struct {
 }
 
 // targets lists what a project has to back up: its Postgres and Redis add-ons and the
-// volumes of its live release.
+// volumes of its live release, except those its kayly.toml opts out with backup = false.
 func (d *Deployer) targets(ctx context.Context, p store.Project) ([]target, error) {
 	addons, err := d.store.Addons(ctx, p.ID)
 	if err != nil {
@@ -76,7 +76,7 @@ func (d *Deployer) targets(ctx context.Context, p store.Project) ([]target, erro
 	seen := map[string]bool{}
 	for _, name := range slices.Sorted(maps.Keys(cfg.Services)) {
 		for _, v := range cfg.Services[name].Volumes {
-			if !seen[v.Name] {
+			if !seen[v.Name] && cfg.BacksUp(v.Name) {
 				seen[v.Name] = true
 				out = append(out, d.volumeTarget(p.Name, v.Name))
 			}

@@ -27,10 +27,24 @@ const ReleaseTarget = "release"
 
 // Config is a validated kayly.toml.
 type Config struct {
-	Build    Build              `toml:"build"`
-	Release  *Release           `toml:"release"`
-	Services map[string]Service `toml:"services"`
-	Env      map[string]EnvVar  `toml:"env"`
+	Build    Build                     `toml:"build"`
+	Release  *Release                  `toml:"release"`
+	Services map[string]Service        `toml:"services"`
+	Env      map[string]EnvVar         `toml:"env"`
+	Volumes  map[string]VolumeSettings `toml:"volumes"`
+}
+
+// VolumeSettings configures one project volume, keyed by the name services mount it under.
+type VolumeSettings struct {
+	// Backup includes the volume in backups. Nil means true. False suits bulk data that is
+	// cheaper to upload again than to archive daily: media libraries, caches.
+	Backup *bool `toml:"backup"`
+}
+
+// BacksUp reports whether the volume called name is included in backups.
+func (c *Config) BacksUp(name string) bool {
+	b := c.Volumes[name].Backup
+	return b == nil || *b
 }
 
 // Build selects how the image is built. An empty Dockerfile means Railpack.
@@ -293,6 +307,17 @@ func (c *Config) validate() error {
 		}
 		if s.Telegram != nil {
 			c.checkTelegram(name, s, fail)
+		}
+	}
+	mounted := map[string]bool{}
+	for _, s := range c.Services {
+		for _, v := range s.Volumes {
+			mounted[v.Name] = true
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(c.Volumes)) {
+		if !mounted[name] {
+			fail("volumes.%s: not mounted by any service", name)
 		}
 	}
 	if _, ok := c.Env[WebhookSecretKey]; ok && len(c.webhookBots()) > 0 {

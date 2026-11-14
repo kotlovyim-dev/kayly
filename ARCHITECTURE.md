@@ -127,6 +127,7 @@ Rules:
 - An env key without `to` reaches every service and the release step. `to` narrows it (invariant 5); `to = []` makes it template-only.
 - `generate` values are created once, on first deploy, and shown in the UI; they never change unless the user regenerates them.
 - `template` resolves `${KEY}`, `${postgres.<host|port|user|password|db|url>}`, `${redis.<host|port|password|url>}` and `${<service>.url}` at release time. `${postgres.url}` is the superuser URL; scope it.
+- `[volumes.<name>] backup = false` leaves a mounted volume out of backups (§8), for bulk data that is cheaper to recreate than to archive daily. A table for a volume no service mounts is an error.
 - Add-ons are not declared here: they are attached in Kayly (§8) and inject their variable (`DATABASE_URL`, `REDIS_URL`) into every target. Declaring that key in `[env]` takes it over, so leryo keeps its DML-only `DATABASE_URL`.
 - Only declared keys are delivered. A stored value whose key is no longer in `[env]` is ignored and reported, so deleting a line from the file can never leak a secret to every service.
 - A `command` replaces the image's entrypoint and command, and runs without a shell (words are split like a shell would split them). Use `sh -c '…'` for pipes, `&&` or `$VAR` expansion. Without `command` the image runs as built.
@@ -220,7 +221,7 @@ One click (UI) or `kayly addons add <kind>` attaches an add-on to a project, lik
 |---|---|---|
 | Postgres add-on | `pg_dump -Fc` | before every release step (a bad migration can always be undone), daily, on demand |
 | Redis add-on | `valkey-cli --rdb` (a point-in-time snapshot) | daily, on demand |
-| Volumes | `tar` from a throwaway container that mounts the volume read-only | daily, on demand |
+| Volumes | `tar` from a throwaway container that mounts the volume read-only; a volume with `backup = false` in `[volumes.<name>]` is skipped | daily, on demand |
 | Kayly itself | `VACUUM INTO` snapshot of `kayly.db`, plus `master.key` | daily, and before `kayly upgrade` |
 
 - **Local:** 14 per project and kind in `/var/lib/kayly/backups/<project>`, downloadable from the UI and CLI. They cover mistakes and bad migrations.
