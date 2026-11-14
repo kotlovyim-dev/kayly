@@ -2,6 +2,11 @@
 
 Every release of Kayly, newest first. The format follows [Keep a Changelog](https://keepachangelog.com); versions follow [semantic versioning](docs/compatibility.md) from 1.0. When a version is tagged, its section here becomes the release notes, so rename `Unreleased` to `[x.y.z] - date` in the commit that is tagged.
 
+## Unreleased
+
+### Added
+- `[volumes.<name>] backup = false` in `kayly.toml` leaves a volume out of backups, for bulk data such as a media library that would otherwise be archived in full every day.
+
 ## [0.6.2] - 2026-10-21
 
 ### Changed

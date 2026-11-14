@@ -235,6 +235,22 @@ func backupNames(t *testing.T, h *harness) []string {
 	return out
 }
 
+func TestBackupSkipsVolumesWithBackupOff(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	h.writeConfig(app + "\n[volumes.data]\nbackup = false\n")
+	h.mustDeploy()
+	if _, err := h.d.AddAddon(ctx, "app", "redis"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.d.BackupNow(ctx, "app"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := backupNames(t, h), []string{"rdb"}; !slices.Equal(got, want) {
+		t.Fatalf("kinds = %v, want %v (the opted-out volume must not be archived)", got, want)
+	}
+}
+
 func TestBackupNowCoversDatabasesAndVolumes(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t)

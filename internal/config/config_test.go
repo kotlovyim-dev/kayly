@@ -106,6 +106,26 @@ BOT_TOKEN = { to = ["bot", "poller"] }
 	}
 }
 
+func TestParseVolumeBackupOptOut(t *testing.T) {
+	c, err := Parse([]byte(`
+[services.web]
+port = 80
+volumes = ["media:/media", "uploads:/uploads"]
+
+[volumes.media]
+backup = false
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BacksUp("media") {
+		t.Error("media: backup = false is ignored")
+	}
+	if !c.BacksUp("uploads") {
+		t.Error("uploads: a volume without settings must be backed up")
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	const svc = "[services.web]\nport = 80\n"
 	tests := []struct{ name, toml, want string }{
